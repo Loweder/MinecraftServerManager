@@ -318,15 +318,104 @@ int main(int argc, const char** argv) {
         int fixed = 0;
         int failed = 0;
         int fine = 0;
+        if (options.contains("--minecraft") || options.contains("-m")) {
+            fs::path dir = config.accessNode({"General", (string) "Minecraft", "Dir"}).value;
+            string server = config.accessNode({"General", (string) "Minecraft", "Server"}).value;
+            if (!is_directory(dir)) {
+                failed++;
+                cout << "Invalid minecraft directory '" << dir << "'\n";
+            } else if (!config.lookForNode({"Servers", server})) {
+                failed++;
+                cout << "Server selected in Minecraft configuration '" << server << "' is invalid\n";
+            } else {
+                string core = config.accessNode({"Archs", config.accessNode({"Servers", server, "Arch"}).value, "Core"}).value;
+                string version = config.accessNode({"Cores", core, "Version"}).value;
+                fs::path versionDir =
+                        ((fs::path) config.accessNode({"General", (string) "RootDir"}).value) / ("version/" + version);
+                create_directories(versionDir);
+                string support = config.accessNode({"Cores", core, "Support"}).value;
+                if (support.size() != 2 || support[1] != '+') {
+                    failed++;
+                    cout << "Server selected in Minecraft configuration '" << server << "' doesn't seem to support mods\n";
+                } else {
+                    fs::path modDir = dir / "mods";
+                    fs::path configDir = dir / "config";
+                    fs::path versionMod = versionDir / "mods";
+                    fs::path versionConfig = versionDir / ("config/" + config.accessNode(
+                            {"Archs", config.accessNode({"Servers", server, "Arch"}).value, "Config"}).value);
+                    create_directories(modDir);
+                    create_directories(versionMod);
+                    create_directories(versionConfig);
+                    for (auto &item2: config.accessNode({"Servers", server, "Mods"})) {
+                        string modName = config.accessNode({"Versions", version, "Mods", item2.first}).value;
+                        fs::path absoluteItem = versionMod / modName;
+                        fs::path absoluteLink = modDir / modName;
+                        try {
+                            if (is_symlink(absoluteLink) &&
+                                !(absolute(read_symlink(absoluteLink)) == absolute(absoluteItem))) {
+                                remove(absoluteLink);
+                                fs::create_symlink(absolute(absoluteItem), absoluteLink);
+                                cout << "Symlink in minecraft configuration to mod fixed: " << modName
+                                     << endl;
+                                fixed++;
+                            } else if (!exists(absoluteLink)) {
+                                fs::create_symlink(absolute(absoluteItem), absoluteLink);
+                                cout << "Symlink in minecraft configuration to mod created: " << modName
+                                     << endl;
+                                fixed++;
+                            } else if (exists(absoluteLink) && !is_symlink(absoluteLink)) {
+                                cout << "Failed to create symlink to mod in minecraft configuration, location already taken: " << modName << endl;
+                                failed++;
+                            } else {
+                                fine++;
+                            }
+                        } catch (const fs::filesystem_error &ex) {
+                            if (is_symlink(absoluteLink)) {
+                                remove(absoluteLink);
+                                fs::create_symlink(absolute(absoluteItem), absoluteLink);
+                                cout << "Symlink in minecraft configuration to mod fixed: " << modName
+                                     << endl;
+                                fixed++;
+                            }
+                        }
+                    }
+                    try {
+                        if (is_symlink(configDir) &&
+                            !(absolute(read_symlink(configDir)) == absolute(versionConfig))) {
+                            remove(configDir);
+                            fs::create_symlink(absolute(versionConfig), configDir);
+                            cout << "Symlink in minecraft configuration to config folder fixed" << endl;
+                            fixed++;
+                        } else if (!exists(configDir)) {
+                            fs::create_symlink(absolute(versionConfig), configDir);
+                            cout << "Symlink in minecraft configuration to config folder created" << endl;
+                            fixed++;
+                        } else if (exists(configDir) && !is_symlink(configDir)) {
+                            cout << "Failed to create symlink to config folder in minecraft configuration, location already taken" << endl;
+                            failed++;
+                        } else {
+                            fine++;
+                        }
+                    } catch (const fs::filesystem_error &ex) {
+                        if (is_symlink(configDir)) {
+                            remove(configDir);
+                            fs::create_symlink(absolute(versionConfig), configDir);
+                            cout << "Symlink in minecraft configuration to config folder fixed" << endl;
+                            fixed++;
+                        }
+                    }
+                }
+            }
+        }
         for (auto &item: config.accessNode("Servers")) {
             fs::path dir = ((fs::path)config.accessNode({"General", (string) "RootDir"}).value) / ("server/" + item.first);
             create_directories(dir);
             string core = config.accessNode({"Archs", item.second.accessNode("Arch").value, "Core"}).value;
             fs::path coreDir = ((fs::path)config.accessNode({"General", (string) "RootDir"}).value) / ("core/" + core);
-            create_directories(dir);
+            create_directories(coreDir);
             string version = config.accessNode({"Cores", core, "Version"}).value;
             fs::path versionDir = ((fs::path)config.accessNode({"General", (string) "RootDir"}).value) / ("version/" + version);
-            create_directories(dir);
+            create_directories(versionDir);
             for (const auto &item2: fs::directory_iterator(coreDir)) {
                 fs::path relativeItem = relative(item2.path(), coreDir);
                 fs::path absoluteLink = dir / relativeItem;
@@ -367,12 +456,6 @@ int main(int argc, const char** argv) {
                     create_directories(pluginDir);
                     create_directories(versionPlugin);
                     for (auto &item2: item.second.accessNode("Plugins")) {
-                        if (!config.lookForNode({"Versions", version, "Plugins", item2.first})) {
-                            failed++;
-                            cout << "Failed to create symlink to plugin in server '" << item.first
-                                      << "', plugin file not found" << endl;
-                            continue;
-                        }
                         string pluginName = config.accessNode({"Versions", version, "Plugins", item2.first}).value;
                         fs::path absoluteItem = versionPlugin / pluginName;
                         fs::path absoluteLink = pluginDir / pluginName;
@@ -412,12 +495,6 @@ int main(int argc, const char** argv) {
                     create_directories(versionMod);
                     create_directories(versionConfig);
                     for (auto &item2: item.second.accessNode("Mods")) {
-                        if (!config.lookForNode({"Versions", version, "Mods", item2.first})) {
-                            failed++;
-                            cout << "Failed to create symlink to mod in server '" << item.first
-                                      << "', mod file not found" << endl;
-                            continue;
-                        }
                         string modName = config.accessNode({"Versions", version, "Mods", item2.first}).value;
                         fs::path absoluteItem = versionMod / modName;
                         fs::path absoluteLink = modDir / modName;
@@ -561,24 +638,42 @@ int main(int argc, const char** argv) {
         parseConfig(config);
         if (!config.lookForNode({"Servers", arguments[1]}))
             printError("Server with name '" + arguments[1] + "' doesn't exist\n");
-        string core = config.accessNode({"Archs", config.accessNode({"Servers", arguments[1], "Arch"}).value, "Core"}).value;
+        string arch = config.accessNode({"Servers", arguments[1], "Arch"}).value;
+        string core = config.accessNode({"Archs", arch, "Core"}).value;
         if (config.accessNode({"Cores", core, "Support"}).value[1] != '+')
             printError("Server with name '" + arguments[1] + "' doesn't use mods\n");
         zip_t *archive = zip_open((arguments[1] + "_user.zip").c_str(), ZIP_CREATE | ZIP_TRUNCATE, nullptr);
         if (!archive) printError("Was unable to make archive");
         string version = config.accessNode({"Cores", core, "Version"}).value;
         StringNode &versionNode = config.accessNode({"Versions", version, "Mods"});
-        fs::path versionsDir = ((fs::path)config.accessNode({"General", (string) "RootDir"}).value) / ("version/" + version + "/mods/");
+        fs::path versionsDir = ((fs::path)config.accessNode({"General", (string) "RootDir"}).value) / ("version/" + version);
+        fs::path modsDir = versionsDir / "mods/";
+        fs::path configDir = versionsDir / ("config/" + config.accessNode({"Archs", arch, "Config"}).value);
+        function<void(const fs::path&)> recFunc = [&archive, &configDir, &recFunc](const fs::path &dir){
+            for (const auto &item2: fs::directory_iterator(dir)) {
+                if (item2.is_regular_file()) {
+                    zip_source_t *source = zip_source_file(archive, item2.path().c_str(), 0, 0);
+                    if (!source) printError("Was unable to open file as zip source\n");
+                    zip_file_add(archive, ("config" / relative(item2.path(), configDir)).c_str(), source, ZIP_FL_OVERWRITE);
+                } else if (item2.is_directory()) {
+                    zip_dir_add(archive, ("config" / relative(item2.path(), configDir)).c_str(), 0);
+                    recFunc(item2.path());
+                }
+            }
+        };
+        zip_dir_add(archive, "config", 0);
+        recFunc(configDir);
+        zip_dir_add(archive, "mods", 0);
         for (auto &item: config.accessNode({"Servers", arguments[1], "UserMods"})) {
             string realName = versionNode.accessNode(item.first).value;
-            fs::path file = versionsDir / realName;
+            fs::path file = modsDir / realName;
             if (!fs::is_regular_file(file)) printError("One of mods is not a regular file\n");
             string filePath = file.string();
 
             struct zip_source *source = zip_source_file(archive, filePath.c_str(), 0, 0);
             if (!source) printError("Was unable to open mod file as zip source\n");
 
-            zip_file_add(archive, realName.c_str(), source, ZIP_FL_OVERWRITE);
+            zip_file_add(archive, ("mods/" + realName).c_str(), source, ZIP_FL_OVERWRITE);
         }
         if (zip_close(archive) == -1) printError("Was unable to save archive, error code: " + to_string(zip_get_error(archive)->zip_err) + "\n");
     } else if (arguments[0] == "boot") {
@@ -615,16 +710,17 @@ void exitWithUsage() {
     cout << "Minecraft SERver MANager - Utility for easy server managements"
             "Usage: mserman [options...] [--] <command>\n"
             "Commands:\n"
-            "    verify                            Verify validity of data\n"
+            "    [-m] verify                       Verify validity of data\n"
             "    make <arch> <name>                Create Minecraft server\n"
-            "    backup -a (save|load)             Load/backup all worlds\n"
+            "    -a backup (save|load)             Load/backup all worlds\n"
             "    backup (save|load) <server>       Load/backup world\n"
             "    collect <server>                  Collect user mods in archive\n"
             "    boot <server>                     Start Minecraft server\n"
             "    schedule <server> <time>          Schedule Minecraft server\n"
             "Options:\n"
-            "    -a    --all    Select all\n"
-            "    -h    --help   Display this window\n";
+            "    -a    --all        Select all\n"
+            "    -h    --help       Display this window\n"
+            "    -m    --minecraft  Only link in Minecraft folder\n";
     exit(EXIT_FAILURE);
 }
 void printError(const string &message) {
