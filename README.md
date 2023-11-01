@@ -12,9 +12,9 @@ make
 ```
 ## Usage
 First configure config mserman.conf (example config is example_mserman.conf)
-Add versions, cores and architectures.
+Add versions, cores and packs.
 
-To add mod, or plugin, first create a version, and set path for General.RootDir (folder in which all server files will be stored).
+To add mod, or plugin, first create a version, and set path for GENERAL.ROOT-DIR (folder in which all server files will be stored).
 Then, run
 ```bash
 ./mserman verify
@@ -31,20 +31,26 @@ To create core, add core files to your_root/cores/core_name. Also add core to co
 
 To create server, run
 ```bash
-./mserman make <arch> <name>
+./mserman make <core> <name>
 ```
-Where "arch" is valid architecture in config.
+Where "core" is valid core in config.
 After creation run
 ```bash
 ./mserman verify
 ```
-And configure mserman.conf to add plugins and mods.
-
-To run server use
+And configure mserman.conf to add plugins and mods. To run server use
 ```bash
 ./mserman boot <name>
 ```
+## Installation
+If you want to access mserman from anywhere on your system run this:
+```bash
+sudo cp ./build/mserman /bin
+```
+If you have already installed mserman before, run this:
+```bash
+sudo rm /bin/mserman && sudo cp ./build/mserman /bin
+```
 ## Contributing
-
 Pull requests are welcome. For major changes, please open an issue first
 to discuss what you would like to change.
