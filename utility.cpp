@@ -14,102 +14,79 @@ StatNode& StatNode::operator[](const string &index) {
 }
 
 #define SA(...) __VA_ARGS__
-#define TEMPLATED_NODE(result, name) template<typename type, typename self> \
-result Node<type, self>::name
+#define TEMPLATED_NODE(result, name, args) template<typename Value, typename Self> \
+result Node<Value, Self>::name args
 
-TEMPLATED_NODE(self &, operator[](const vector<string> &path)) {
+TEMPLATED_NODE(Self &, operator[], (const vector<string> &path)) {
     if (isNull()) return nullObject;
-    self *currentNode = (self *) this;
+    Self *currentNode = (Self *) this;
     for (const string& nodeName : path)
-        currentNode = &(currentNode->operator[](nodeName));
+        currentNode = &((*currentNode)[nodeName]);
     return *currentNode;
 }
-TEMPLATED_NODE(self &, operator[](const StringNode &index)) {
+TEMPLATED_NODE(Self &, operator[], (const StringNode &index)) {
     return this->operator[](index.value);
 }
-TEMPLATED_NODE(self &, operator[](const string &index)) {
+TEMPLATED_NODE(Self &, operator[], (const string &index)) {
     if (isNull()) return nullObject;
-    if (!children.contains(index)) children.emplace(index, self());
+    if (!children.contains(index)) children.emplace(index, Self());
     return children[index];
 }
 
-TEMPLATED_NODE(const self &, operator()(const vector<string> &path) const) {
+TEMPLATED_NODE(const Self &, operator(), (const vector<string> &path) const) {
     if (isNull()) return nullObject;
-    const self *currentNode = (self *) this;
+    const Self *currentNode = (Self *) this;
     for (const string& nodeName : path)
         currentNode = &(currentNode->operator()(nodeName));
     return *currentNode;
 }
-TEMPLATED_NODE(const self &, operator()(const StringNode &index) const) {
+TEMPLATED_NODE(const Self &, operator(), (const StringNode &index) const) {
     return this->operator()(index.value);
 }
-TEMPLATED_NODE(const self &, operator()(const string &index) const) {
+TEMPLATED_NODE(const Self &, operator(), (const string &index) const) {
     if (isNull()) return nullObject;
     if (!children.contains(index))
         return nullObject;
     return children.find(index)->second;
 }
 
-TEMPLATED_NODE(bool, val(const type &index) const) {
+TEMPLATED_NODE(bool, val, (const Value &index) const) {
     if (isNull()) return false;
-    return any_of(children.begin(), children.end(), [&index](const pair<string, self> &item) {
+    return any_of(children.begin(), children.end(), [&index](const pair<string, Self> &item) {
         return item.second.value == index;
     });
 }
-TEMPLATED_NODE(, operator bool() const) {
+TEMPLATED_NODE(, operator bool, () const) {
     return !isNull();
 }
 
-TEMPLATED_NODE(SA(map<string, self>::iterator), end()) {
+TEMPLATED_NODE(SA(map<string, Self>::iterator), end, ()) {
     return children.end();
 }
-TEMPLATED_NODE(SA(map<string, self>::iterator), begin()){
+TEMPLATED_NODE(SA(map<string, Self>::iterator), begin, ()){
     return children.begin();
 }
 
-TEMPLATED_NODE(size_t, hash() const) {
+TEMPLATED_NODE(size_t, hash, () const) {
     std::hash<string> keyHashGen;
-    std::hash<type> hashGen;
+    std::hash<Value> hashGen;
     size_t seed = hashGen(value);
-    for (const auto &item: children) {
-        if (item.first == "HASH-GEN") continue;
-        seed ^= keyHashGen(item.first) + 0x9e3779b9 + (seed << 6) + (seed >> 2) ^ item.second.hash();
+    for (const auto &[key, eValue]: children) {
+        if (key == "HASH-GEN") continue;
+        seed ^= keyHashGen(key) + 0x9e3779b9 + (seed << 6) + (seed >> 2) ^ eValue.hash();
     }
     return seed;
 }
 
-TEMPLATED_NODE(bool, isNull() const) {
-    return ((self*)this)==&nullObject;
+TEMPLATED_NODE(bool, isNull, () const) {
+    return ((Self*)this)==&nullObject;
 }
-TEMPLATED_NODE(self, nullObject);
+TEMPLATED_NODE(Self, nullObject,);
 
 void exitWithUsage() {
-    //TODO: Add reset/delete/edit/sort/schedule functionality, implement no-report, no-hash-gen, simulate. Add support for 1 letter arguments
-    //  Add "no comment gen", machine cache file, clearing other files in mods/configs
-    cerr << "Minecraft SERver MANager - Utility for easy server managements"
-            "Usage: mserman [options...] [--] <command>\n"
-            "Commands:\n"
-            "    boot <server>                      Start Minecraft server\n"
-            "    schedule <server> <time>           Schedule Minecraft server\n"
-            "    edit <path> <value>                Edit data in config\n"
-            "    sort                               Sort data in config\n"
-            "    [-m|s] verify                      Verify data in config\n"
-            "    [-y] reset [hard]                  Clean data in config (CAUTION! Dangerous)\n"
-            "    make <server> <core>               Create server\n"
-            "    [-y] delete <server>               Delete server (CAUTION! Dangerous)\n"
-            "    -a[y] backup (save|load)           Load/backup all worlds (CAUTION! Dangerous)\n"
-            "    [-y] backup (save|load) <server>   Load/backup world (CAUTION! Dangerous)\n"
-            "    collect <server>                   Collect user mods in archive\n"
-            "Options:\n"
-            "    -h    --help                       Display this window\n"
-            "    -v    --version                    Display version\n"
-            "    -a    --all                        Select all\n"
-            "    -s    --simulate                   Simulate server with every mod/plugin to get dependencies/ids\n"
-            "    -m    --minecraft                  Only link in Minecraft folder\n"
-            "    -n    --no-report                  Do not generate verification report\n"
-            "    -y    --force-yes                  Do not ask for confirmation (CAUTION! Dangerous)\n"
-            "    -g    --ignore-hash-gen            Do not verify HASH-GEN value. Only use this if you know what you're doing\n";
-    exit(EXIT_FAILURE);
+    auto a = set<string>();
+    auto b = vector<string>();
+    exit(helpOp(a, b));
 }
 void printError(const string &message) {
     cerr << message << endl;
@@ -136,29 +113,31 @@ string &stringToUpper(string &str) {
 }
 
 string writeWord(const string &word) {
-    if (word.contains(' '))
+    if (word.contains(' ') || word.contains('\''))
         return '"' + word + '"';
+    else if (word.empty())
+        return "\"\"";
     else
         return word;
 }
-void flushConfig(StringNode &config, const fs::path &path, bool format) {
+void flushConfig(StringNode &config, const fs::path &path, bool format, bool compact) {
     ofstream file{path};
     if (!file.is_open()) printError("Failed to open " + path.filename().string() + " for writing.\n");
-    function<void(StringNode&, const string&)> lambda = [&file,&lambda, &format](StringNode& rootNode, const string &level) {
-        bool needTab = true;
-        for (auto &item: rootNode) {
-            file << (format && needTab ? level : "") << writeWord(item.first);
-            StringNode &node = item.second;
-            if (!node.value.empty() || !node.children.empty()) {
-                if (!node.value.empty()) file << " = " << writeWord(node.value) << (format ? (node.children.empty() ? "\n" : " <") : (node.children.empty() ? "" : " < "));
-                if (!node.children.empty()) {
+    function<void(StringNode&, const string&)> lambda = [&file,&lambda, &format, &compact](StringNode& rootNode, const string &level) {
+        bool needTab = true, rootSize = rootNode.children.size() > 1 || !compact;
+        for (auto &[key, child]: rootNode) {
+            file << (format && needTab && rootSize ? level : "") << writeWord(key);
+            if (!child.value.empty() || !child.children.empty()) {
+                if (!child.value.empty()) file << " = " << writeWord(child.value) << (format ? (child.children.empty() ? "\n" : " < ") : (child.children.empty() ? "" : " < "));
+                if (!child.children.empty()) {
                     if (format) {
-                        file << "\n";
-                        lambda(item.second, level + "    ");
-                        file << level << "> ";
+                        bool size = child.children.size() > 1 || !compact;
+                        if (size) file << "\n";
+                        lambda(child, size ? level + "    " : level);
+                        file << (rootSize ? level : "") << "> ";
                         needTab = false;
                     } else {
-                        lambda(item.second, "");
+                        lambda(child, "");
                         file << "> ";
                     }
                     continue;
@@ -166,7 +145,7 @@ void flushConfig(StringNode &config, const fs::path &path, bool format) {
             } else file << (format ? " >\n" : " > ");
             needTab = true;
         }
-        if (format && !needTab) file << "\n";
+        if (format && !needTab && rootSize) file << "\n";
     };
     lambda(config, "");
     file.flush();
@@ -185,8 +164,9 @@ bool readWord(istream &file, string &word) {
         word = word.substr(1, word.size() - 2);
     return res;
 }
-void parseConfig(StringNode &config, const fs::path &filePath) {
+void parseConfig(StringNode &config, const fs::path &filePath, bool mkDef) {
     if (!fs::exists(filePath)) {
+        if (!mkDef) return;
         ofstream file{filePath};
         if (!file.is_open()) printError("Failed to create default " + filePath.filename().string() + " config.\n");
         file << "GENERAL ROOT-DIR = data >";
@@ -214,13 +194,36 @@ void parseConfig(StringNode &config, const fs::path &filePath) {
     file.close();
 }
 
-bool checkHash(StringNode &root) {
+void parseJsonInternal(StringNode &config, const Json::Value &root) { // NOLINT(*-no-recursion)
+    if (root.isArray()) {
+        int index = 0;
+        for (const auto &item: root) {
+            parseJsonInternal(config[to_string(index++)], item);
+        }
+    } else if (root.isObject()) {
+        for (const auto &item: root.getMemberNames()) {
+            parseJsonInternal(config[item], root.get(item, Json::Value::null));
+        }
+    } else {
+        config.value = root.asString();
+    }
+}
+void parseJson(StringNode &config, istream &from) {
+    Json::CharReaderBuilder reader;
+    Json::Value root;
+    Json::parseFromStream(reader, from, &root, nullptr);
+    parseJsonInternal(config, root);
+}
+
+bool checkHash(StringNode &root, StringNode &cache) {
     try {
-        if(!root("HASH-GEN")("VALUE")) {
+        if(!cache("HASH-GEN")("VALUE")) {
             return false;
         }
-        size_t value = stoul(root["HASH-GEN"]["VALUE"].value, nullptr, 16);
-        return value == root.hash();
+        size_t value = stoul(cache["HASH-GEN"]["VALUE"].value, nullptr, 16);
+        size_t seed = root.hash();
+        seed ^= cache.hash() + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        return value == seed;
     } catch (exception const& ex) {
         return false;
     }
@@ -236,8 +239,8 @@ string ultos(unsigned long value) {
 
     return result;
 }
-void setHash(StringNode &root) {
-    root["HASH-GEN"]["VALUE"].value = ultos(root.hash());
-    root["HASH-GEN"]["_COMMENT1"].value = "GENERATED BY HASH-GEN. DO NOT TOUCH!";
-    root["HASH-GEN"]["_COMMENT2"].value = "CHANGING THIS VALUE WILL INVALIDATE YOUR CONFIG";
+void setHash(StringNode &root, StringNode &cache) {
+    size_t seed = root.hash();
+    seed ^= cache.hash() + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+    cache["HASH-GEN"]["VALUE"].value = ultos(seed);
 }
