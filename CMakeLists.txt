@@ -1,7 +1,7 @@
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.10)
 set(TARGET ServerManager)
 set(MSERMAN_VERSION 1)
-set(VERSION 2.0.0)
+set(VERSION 2.0.1)
 project(${TARGET}
         VERSION ${VERSION}
         LANGUAGES C CXX)
@@ -12,7 +12,8 @@ set(SOURCES main.cpp
         utility.cpp
         verify.cpp
         bit_defines.hpp
-        operation.cpp)
+        operation.cpp
+        info.cpp)
 
 
 configure_file(version.h.in version.h)

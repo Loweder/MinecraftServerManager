@@ -19,21 +19,22 @@ void printError(const string &message) __attribute__ ((__noreturn__));
 int stringToCode(const string &str, int bits, int defaultValue) __attribute__ ((pure));
 string codeToString(int val, int bits) __attribute__ ((pure));
 string &stringToUpper(string &str) __attribute__ ((pure));
+string &stringToLower(string &str) __attribute__ ((pure));
 
-struct StringNode;
+struct string_node;
 
 template<typename Value, typename Self>
-struct Node {
+struct node {
     using value_type [[maybe_unused]] = Value;
     map<string, Self> children;
     Value value{};
-    virtual ~Node() = default;
+    virtual ~node() = default;
     Self &operator[](const vector<string> &path);
-    Self &operator[](const StringNode &index);
+    Self &operator[](const string_node &index);
     virtual Self &operator[](const string &index);
 
     [[nodiscard]] const Self &operator()(const vector<string>& path) const;
-    [[nodiscard]] const Self &operator()(const StringNode &index) const;
+    [[nodiscard]] const Self &operator()(const string_node &index) const;
     [[nodiscard]] const Self &operator()(const string &index) const;
 
     [[nodiscard]] bool val(const Value &index) const;
@@ -55,27 +56,34 @@ protected:
     static Self nullObject;
     [[nodiscard]] bool isNull() const;
 };
-struct StatNode: Node<int, StatNode> {
-    StatNode(): parent(nullptr) {};
-    explicit StatNode(StatNode *parent): parent(parent) {};
-    StatNode* const parent;
+struct stat_node: node<int, stat_node> {
+    stat_node(): parent(nullptr) {};
+    explicit stat_node(stat_node *parent): parent(parent) {};
+    stat_node* const parent;
     void operator++(int);
-    using Node::operator[];
-    StatNode &operator[](const string &index) override;
+    using node::operator[];
+    stat_node &operator[](const string &index) override;
 };
-struct StringNode: Node<string, StringNode> {};
-template struct Node<string, StringNode>;
-template struct Node<int, StatNode>;
+struct string_node: node<string, string_node> {};
+template struct node<string, string_node>;
+template struct node<int, stat_node>;
 
-void flushConfig(StringNode &config, const fs::path &path, bool format = true, bool compact=false);
-void parseConfig(StringNode &config, const fs::path &filePath, bool mkDef = true);
-void parseJson(StringNode &config, istream &from);
-bool checkHash(StringNode &root, StringNode &cache);
-void setHash(StringNode &root, StringNode &cache);
+struct root_pack {
+    string_node root;
+    string_node cache;
+    stat_node stats;
+};
+
+void flushConfig(string_node &config, const fs::path &path, bool format = true, bool compact=false);
+void parseConfig(string_node &config, const fs::path &filePath, bool mkDef = true);
+void parseJson(string_node &config, istream &from);
+bool checkHash(root_pack &root);
+void setHash(root_pack &root);
 
 using operation = int(*)(set<string>&,vector<string>&);
-int switchOp(set<string> &module, vector<string> &dirEntries);
-int verifyOp(set<string> &module, vector<string> &dirEntries);
+int sortOp(set<string> &options, vector<string> &arguments);
+int switchOp(set<string> &options, vector<string> &arguments);
+int verifyOp(set<string> &options, vector<string> &arguments);
 int importOp(set<string> &options, vector<string> &arguments);
 int makeOp(set<string> &options, vector<string> &arguments);
 int collectOp(set<string> &options, vector<string> &arguments);
@@ -102,20 +110,21 @@ constexpr string mapOption(const string &raw) {
 }
 constexpr operation mapOperation(const string &name) {
     if (name == "switch") return switchOp;
-    if (name == "verify") return verifyOp;
-    if (name == "make") return makeOp;
-    if (name == "import") return importOp;
-    if (name == "collect") return collectOp;
-    if (name == "backup") return backupOp;
     if (name == "boot") return bootOp;
+    if (name == "sort") return sortOp;
+    if (name == "verify") return verifyOp;
+    if (name == "collect") return collectOp;
+    if (name == "import") return importOp;
+    if (name == "make") return makeOp;
+    if (name == "backup") return backupOp;
     if (name == "help") return helpOp;
     if (name == "version") return versionOp;
     if (name == "exit") return exitOp;
     return nullOp;
 }
 
-pid_t forkToServer(pair<const string, StringNode &> serverEntry, StringNode& root, int input, int output, int error);
-set<pair<string, string>> collectPack(StringNode &module, StringNode& root, int side);
+pid_t forkToServer(string &server, root_pack& root, int input, int output, int error);
+set<pair<string, string>> collectPack(string_node &module, root_pack& root, string &version, int side);
 
 
 #endif //MAIN_HPP

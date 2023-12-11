@@ -2,20 +2,20 @@
 #include <iostream>
 #include <fstream>
 
-void StatNode::operator++(int) { // NOLINT(*-no-recursion)
+void stat_node::operator++(int) { // NOLINT(*-no-recursion)
     value++;
     if (parent)
         (*parent)++;
 }
-StatNode& StatNode::operator[](const string &index) {
+stat_node& stat_node::operator[](const string &index) {
     if (isNull()) return nullObject;
-    if (!children.contains(index)) children.emplace(index, StatNode(this));
+    if (!children.contains(index)) children.emplace(index, stat_node(this));
     return children[index];
 }
 
 #define SA(...) __VA_ARGS__
 #define TEMPLATED_NODE(result, name, args) template<typename Value, typename Self> \
-result Node<Value, Self>::name args
+result node<Value, Self>::name args
 
 TEMPLATED_NODE(Self &, operator[], (const vector<string> &path)) {
     if (isNull()) return nullObject;
@@ -24,7 +24,7 @@ TEMPLATED_NODE(Self &, operator[], (const vector<string> &path)) {
         currentNode = &((*currentNode)[nodeName]);
     return *currentNode;
 }
-TEMPLATED_NODE(Self &, operator[], (const StringNode &index)) {
+TEMPLATED_NODE(Self &, operator[], (const string_node &index)) {
     return this->operator[](index.value);
 }
 TEMPLATED_NODE(Self &, operator[], (const string &index)) {
@@ -40,7 +40,7 @@ TEMPLATED_NODE(const Self &, operator(), (const vector<string> &path) const) {
         currentNode = &(currentNode->operator()(nodeName));
     return *currentNode;
 }
-TEMPLATED_NODE(const Self &, operator(), (const StringNode &index) const) {
+TEMPLATED_NODE(const Self &, operator(), (const string_node &index) const) {
     return this->operator()(index.value);
 }
 TEMPLATED_NODE(const Self &, operator(), (const string &index) const) {
@@ -111,6 +111,10 @@ string &stringToUpper(string &str) {
     transform(str.begin(), str.end(), str.begin(), ::toupper);
     return str;
 }
+string &stringToLower(string &str) {
+    transform(str.begin(), str.end(), str.begin(), ::tolower);
+    return str;
+}
 
 string writeWord(const string &word) {
     if (word.contains(' ') || word.contains('\''))
@@ -120,10 +124,10 @@ string writeWord(const string &word) {
     else
         return word;
 }
-void flushConfig(StringNode &config, const fs::path &path, bool format, bool compact) {
+void flushConfig(string_node &config, const fs::path &path, bool format, bool compact) {
     ofstream file{path};
     if (!file.is_open()) printError("Failed to open " + path.filename().string() + " for writing.\n");
-    function<void(StringNode&, const string&)> lambda = [&file,&lambda, &format, &compact](StringNode& rootNode, const string &level) {
+    function<void(string_node&, const string&)> lambda = [&file,&lambda, &format, &compact](string_node& rootNode, const string &level) {
         bool needTab = true, rootSize = rootNode.children.size() > 1 || !compact;
         for (auto &[key, child]: rootNode) {
             file << (format && needTab && rootSize ? level : "") << writeWord(key);
@@ -164,7 +168,7 @@ bool readWord(istream &file, string &word) {
         word = word.substr(1, word.size() - 2);
     return res;
 }
-void parseConfig(StringNode &config, const fs::path &filePath, bool mkDef) {
+void parseConfig(string_node &config, const fs::path &filePath, bool mkDef) {
     if (!fs::exists(filePath)) {
         if (!mkDef) return;
         ofstream file{filePath};
@@ -194,7 +198,7 @@ void parseConfig(StringNode &config, const fs::path &filePath, bool mkDef) {
     file.close();
 }
 
-void parseJsonInternal(StringNode &config, const Json::Value &root) { // NOLINT(*-no-recursion)
+void parseJsonInternal(string_node &config, const Json::Value &root) { // NOLINT(*-no-recursion)
     if (root.isArray()) {
         int index = 0;
         for (const auto &item: root) {
@@ -208,21 +212,21 @@ void parseJsonInternal(StringNode &config, const Json::Value &root) { // NOLINT(
         config.value = root.asString();
     }
 }
-void parseJson(StringNode &config, istream &from) {
+void parseJson(string_node &config, istream &from) {
     Json::CharReaderBuilder reader;
     Json::Value root;
     Json::parseFromStream(reader, from, &root, nullptr);
     parseJsonInternal(config, root);
 }
 
-bool checkHash(StringNode &root, StringNode &cache) {
+bool checkHash(root_pack &root) {
     try {
-        if(!cache("HASH-GEN")("VALUE")) {
+        if(!root.cache("HASH-GEN")("VALUE")) {
             return false;
         }
-        size_t value = stoul(cache["HASH-GEN"]["VALUE"].value, nullptr, 16);
-        size_t seed = root.hash();
-        seed ^= cache.hash() + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        size_t value = stoul(root.cache["HASH-GEN"]["VALUE"].value, nullptr, 16);
+        size_t seed = root.root.hash();
+        seed ^= root.cache.hash() + 0x9e3779b9 + (seed << 6) + (seed >> 2);
         return value == seed;
     } catch (exception const& ex) {
         return false;
@@ -239,8 +243,8 @@ string ultos(unsigned long value) {
 
     return result;
 }
-void setHash(StringNode &root, StringNode &cache) {
-    size_t seed = root.hash();
-    seed ^= cache.hash() + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-    cache["HASH-GEN"]["VALUE"].value = ultos(seed);
+void setHash(root_pack &root) {
+    size_t seed = root.root.hash();
+    seed ^= root.cache.hash() + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+    root.cache["HASH-GEN"]["VALUE"].value = ultos(seed);
 }
