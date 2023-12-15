@@ -54,12 +54,13 @@ vector<module_entry> lookFile(const fs::path &file) {
     vector<module_entry> result{};
     if (!jar) return result;
     int64_t num = zip_get_num_entries(jar, 0);
+    zip_stat_t stat;
     for (int i = 0; i < num; ++i) {
-        zip_stat_t stat;
         zip_stat_init(&stat);
         if (!zip_stat_index(jar, i, 0, &stat)) {
             if (forgeEntry != stat.name && fabricEntry != stat.name && bukkitEntry != stat.name) continue;
             zip_file_t *subFile = zip_fopen_index(jar, i, 0);
+            if (!subFile) continue;
             zip_buf buffer{subFile};
             istream data{&buffer};
             if (bukkitEntry == stat.name) {
@@ -233,6 +234,7 @@ vector<module_entry> lookFile(const fs::path &file) {
  *
  * @param root root node
  * @param filename file to look for
+ * @param mc_version version to check
  * @return list of found modules
  */
 vector<module_entry> lookRoot(root_pack &root, const string &filename, const string &mc_version) {
@@ -244,7 +246,7 @@ vector<module_entry> lookRoot(root_pack &root, const string &filename, const str
                 module_entry entry;
                 entry.id = id;
                 entry.version = versionId;
-                entry.model = stringToCode(fileInfo["MODEL"].value, 2, MODEL_FORGE);
+                entry.model = fileInfo["MODEL"].asCode(2, MODEL_FORGE);
                 result.emplace_back(entry);
             }
         }
@@ -264,18 +266,18 @@ bool versionMatch(const string &source, const string &version, module_entry::mat
     vector<string> version1;
     vector<string> version2;
 
-    size_t start = 0, end;
-    version1.push_back(source.substr(0, source.find('.')));
-    while ((end = source.find('.', start)) != std::string::npos) {
+    size_t start = 0, end = source.find('.');
+    do {
         version1.push_back(source.substr(start, end - start));
         start = end + 1;
-    }
-    start = 0;
-    version2.push_back(version.substr(0, source.find('.')));
-    while ((end = version.find('.', start)) != std::string::npos) {
+    } while ((end = source.find('.', start)) != std::string::npos);
+    version1.push_back(source.substr(start));
+    start = 0, end = source.find('.');
+    do {
         version2.push_back(version.substr(start, end - start));
         start = end + 1;
-    }
+    } while ((end = version.find('.', start)) != std::string::npos);
+    version2.push_back(version.substr(start));
 
 
     for (size_t i = 0; i < version1.size() && i < version2.size(); ++i) {
@@ -315,11 +317,11 @@ string combine(const string& id, const string& version) {
 }
 
 //TODO remove those from here
-pid_t forkToServer(string &server, root_pack &root, int input, int output, int error) {
+pid_t forkToServer(root_pack &root, string &server, int input, int output, int error) {
     pid_t child_pid = fork();
     if (child_pid == 0) {
         string_node &rootServer = root.root["SERVERS"][server];
-        string_node &core = root.root["VERSIONS"][rootServer["VERSION"]]["CORES"][rootServer["CORE"]];
+        string_node &core = root.root["CORES"][rootServer["CORE"]];
         dup2(input, STDIN_FILENO);
         dup2(output, STDOUT_FILENO);
         dup2(error, STDERR_FILENO);
@@ -334,7 +336,8 @@ pid_t forkToServer(string &server, root_pack &root, int input, int output, int e
             args.push_back(token.data());
             strArgs.erase(0, pos + 1);
         }
-        args.push_back(strArgs.data());
+        if (!strArgs.empty())
+            args.push_back(strArgs.data());
         args.push_back((char*)"-jar");
         args.push_back(core["MAIN"].value.data());
         args.push_back(nullptr);
@@ -342,152 +345,7 @@ pid_t forkToServer(string &server, root_pack &root, int input, int output, int e
     }
     return child_pid;
 }
-int importOp(set<string> &options, vector<string> &arguments) {
-    if (arguments.size() != 4) exitWithUsage();
-    root_pack root;
-    parseConfig(root.root, "mserman.conf");
-    parseConfig(root.cache, "cache.conf", false);
-    string &server = arguments[1];
-    string &mc_version = arguments[2];
-    if (!checkHash(root)) printError("HASH-GEN is outdated, please run \"mserman verify\" again");
-    if (root.root("SERVERS")(server)) printError("Server with name \"" + arguments[1] + "\" already exists");
-    if (!root.root("VERSIONS")(mc_version)) printError("Version with name \"" + arguments[2] + "\" doesn't exist");
-    fs::path dirServer = arguments[3];
-    fs::path dirRoot = fs::path(root.root["GENERAL"]["ROOT-DIR"].value);
-    fs::path dirMods = dirServer / "mods";
-    fs::path dirPlugins = dirServer / "plugins";
-    fs::path dirConfigs = dirServer / "config";
-    fs::path dirEntries = ensureExists(dirRoot / "entries", mc_version);
-    string_node &rootModules = root.root["ENTRIES"];
-    string_node &rootPacks = root.root["PACKS"];
-    string_node &rootServer = root.root["SERVERS"][server];
-    if (!is_directory(dirServer)) printError("Path \"" + arguments[3] + "\" doesn't point to server directory");
-    rootServer["CORE"];
-    string key, prefix = server + "_mods";
-    if (exists(dirMods) && !fs::is_empty(dirMods)) {
-        for (int counter = 1; rootPacks(key = (prefix + to_string(counter))); counter++) {}
-        rootServer["PACKS"][key].value = mc_version;
-        string_node &rootPack = rootPacks[key];
-        for (const auto &entry : fs::directory_iterator(dirMods)) {
-            string fileName = relative(entry.path(), dirMods);
-            if (!entry.is_regular_file() && !entry.is_symlink() || entry.path().extension() != ".jar") {
-                cout << "Found invalid imported mod file \"" << fileName << "\"\n";
-            } else {
-                vector<module_entry> modules = lookFile(entry);
-                if (modules.empty()) {
-                    vector<module_entry> existing = lookRoot(root, fileName, mc_version);
-                    if (existing.empty()) {
-                        string temp = fileName.substr(0, fileName.size() - 4);
-                        string key1 = '.' + stringToLower(temp);
-                        rootModules[key1][mc_version]["default"].value = fileName;
-                        rootModules[key1][mc_version]["default"]["MODEL"].value = codeToString(MODEL_FORGE, 2);
-                        rootModules[key1][mc_version]["default"]["STANDALONE"];
-                        rootPack["ENTRIES"][key1].value = "Adefault";
-                        fs::copy(entry, dirEntries);
-                    } else {
-                        for (auto &module: existing) {
-                            rootPack["ENTRIES"][module.id].value = "A" + module.version;
-                        }
-                    }
-                } else {
-                    for (auto &module: modules) {
-                        if (bool edit = shouldVerify(root, module, mc_version); edit) {
-                            string_node &rootModule = rootModules[module.id][mc_version][module.version];
-                            rootModule.value = fileName;
-                            rootModule["MODEL"].value = codeToString(module.model, 2);
-                            rootModule["STANDALONE"];
-                            for (const auto &[depId, depVersion]: module.dependency) {
-                                if (rootModule["DEPENDENCIES"](depId)("FORCED")) continue;
-                                string realDepVersion = ((char)depVersion.second) + depVersion.first;
-                                rootModule["DEPENDENCIES"][depId].value = depVersion.first.empty() ? "" : realDepVersion;
-                            }
-                            for (auto it = rootModule["DEPENDENCIES"].children.begin(); it != rootModule["DEPENDENCIES"].children.end();) {
-                                if (!it->second("FORCED") && !module.dependency.contains(it->first)) {
-                                    it = rootModule["DEPENDENCIES"].children.erase(it);
-                                } else ++it;
-                            }
-                            rootPack["ENTRIES"][module.id].value = "A" + module.version;
-                        }
-                    }
-                }
-            }
-        }
-        prefix = arguments[1] + "_configs";
-        for (int counter = 1; root.root["META-CONFIGS"](key = (prefix + to_string(counter))); counter++) {}
-        fs::path dirSysConfigs = ensureExists(dirRoot / "config", key);
-        rootServer["META-CONFIG"].value = key;
-        if (exists(dirConfigs)) {
-            for (const auto& config : fs::recursive_directory_iterator(dirConfigs)) {
-                string fileName = config.path().lexically_relative(dirConfigs);
-                if (config.is_regular_file()) {
-                    fs::create_directories((dirSysConfigs / fileName).parent_path());
-                    fs::copy(config, dirSysConfigs / fileName);
-                    root.root["META-CONFIGS"][key][fileName].value = "VALID";
-                } else if (!config.is_directory()) {
-                    cout << "Found invalid imported config file \"" << fileName << "\"\n";
-                }
-            }
-        }
-    }
-    if (exists(dirPlugins) && !fs::is_empty(dirPlugins)) {
-        prefix = server + "_plugins";
-        for (int counter = 1; rootPacks(key = (prefix + to_string(counter))); counter++) {}
-        rootServer["PACKS"][key].value = mc_version;
-        string_node &rootPack = rootPacks[key];
-        for (const auto &entry : fs::directory_iterator(dirPlugins)) {
-            string fileName = relative(entry.path(), dirPlugins);
-            if (!entry.is_regular_file() && !entry.is_symlink() || entry.path().extension() != ".jar") {
-                cout << "Found invalid imported plugin file \"" << fileName << "\"\n";
-            } else {
-                vector<module_entry> modules = lookFile(entry);
-                if (modules.empty()) {
-                    vector<module_entry> existing = lookRoot(root, fileName, mc_version);
-                    if (existing.empty()) {
-                        string temp = fileName.substr(0, fileName.size() - 4);
-                        string key1 = '.' + stringToLower(temp);
-                        rootModules[key1][mc_version]["default"].value = fileName;
-                        rootModules[key1][mc_version]["default"]["MODEL"].value = codeToString(MODEL_PLUGIN, 2);
-                        rootModules[key1][mc_version]["default"]["STANDALONE"];
-                        rootPack["ENTRIES"][key1].value = "Adefault";
-                        fs::copy(entry, dirEntries);
-                    } else {
-                        for (auto &module: existing) {
-                            rootPack["ENTRIES"][module.id].value = "A" + module.version;
-                        }
-                    }
-                } else {
-                    for (auto &module: modules) {
-                        if (bool edit = shouldVerify(root, module, mc_version); edit) {
-                            string_node &rootModule = rootModules[module.id][mc_version][module.version];
-                            rootModule.value = fileName;
-                            rootModule["MODEL"].value = codeToString(module.model, 2);
-                            rootModule["STANDALONE"];
-                            for (const auto &[depId, depVersion]: module.dependency) {
-                                if (rootModule["DEPENDENCIES"](depId)("FORCED")) continue;
-                                string realDepVersion = ((char)depVersion.second) + depVersion.first;
-                                rootModule["DEPENDENCIES"][depId].value = depVersion.first.empty() ? "" : realDepVersion;
-                            }
-                            for (auto it = rootModule["DEPENDENCIES"].children.begin(); it != rootModule["DEPENDENCIES"].children.end();) {
-                                if (!it->second("FORCED") && !module.dependency.contains(it->first)) {
-                                    it = rootModule["DEPENDENCIES"].children.erase(it);
-                                } else ++it;
-                            }
-                            rootPack["ENTRIES"][module.id].value = "A" + module.version;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    cout << "Please, run \"mserman verify\" to finish creation\nNote that you will need to setup core by yourself\n";
-    setHash(root);
-    flushConfig(root.root, "mserman.conf");
-    flushConfig(root.cache, "cache.conf");
-    return 0;
-}
-
-set<pair<string, string>> collectPack(string_node &pack, root_pack &root, string &mc_version, int side) {
+set<pair<string, string>> collectPack(root_pack &root, string_node &pack, const string &mc_version, int side) {
     set<pair<string, string>> entries;
     set<pair<string, string>> checked;
     function<void(const string&, const string&)> dfs = [&entries, &dfs, &checked, &root, &side, &mc_version](const string &module, const string &version) {
@@ -499,7 +357,7 @@ set<pair<string, string>> collectPack(string_node &pack, root_pack &root, string
         depVersion = findVersion(rootMod, depVersion, condition);
         if (!checked.insert({module, depVersion}).second) return;
         if (rootMod[depVersion]("SYNTHETIC")) return;
-        int modSide = stringToCode(rootMod[depVersion]["SIDE"].value, 2, SIDE_BOTH);
+        int modSide = rootMod[depVersion]["SIDE"].asCode(2, SIDE_BOTH);
         if (modSide & side) {
             entries.emplace(module, depVersion);
             for (auto &item: rootMod[depVersion]["DEPENDENCIES"]) {
@@ -519,90 +377,229 @@ set<pair<string, string>> collectPack(string_node &pack, root_pack &root, string
     }
     return entries;
 }
-void linkPack(const string &pack, root_pack &root, fs::path &dir, fs::path &dirRoot, string &version, int side, int packModel) {
-    if (side == SIDE_CLIENT && packModel == MODEL_PLUGIN) { // NOLINT(*-branch-clone)
-        //TODO: logging
-        return;
-    } else if (side == SIDE_BOTH) {
-        return;
+void linkPacks(root_pack &root, string_node &packs, const string &dest, int side) {
+    map<string, set<pair<string, string>>> mods;
+    map<string, set<pair<string, string>>> plugins;
+    for (auto &[pack, mc_version]: packs) {
+        int packModel = root.cache["PACKS"][pack][mc_version]["MODEL"].asCode(2, MODEL_FORGE);
+        if (side == SIDE_CLIENT && packModel == MODEL_PLUGIN) {
+            continue;
+        }
+        set<pair<string, string>> modules = collectPack(root, root.root["PACKS"][pack], mc_version.value, side);
+        if (packModel == MODEL_PLUGIN) {
+            plugins[mc_version.value].insert(modules.begin(), modules.end());
+        } else {
+            mods[mc_version.value].insert(modules.begin(), modules.end());
+        }
     }
-    string type = packModel == MODEL_PLUGIN ? "plugin" : "mod";
-    set<pair<string, string>> modules = collectPack(root.root["PACKS"][pack], root, version, side);
-    if (modules.empty()) return;
-    fs::path dirModule = ensureExists(dir, type + 's');
-    fs::path dirEntries = ensureExists(dirRoot / "entries", version);
-    for (auto &absoluteLink: fs::directory_iterator(dirModule)) {
-        string fileName = absoluteLink.path().lexically_relative(dirModule);
-        vector<module_entry> existent = lookRoot(root, fileName, version);
-        if (existent.empty()) continue;
-        fs::path absoluteItem = absolute(dirEntries / fileName);
-        for (auto &module: existent) {
-            if (modules.contains({module.id, module.version})) {
-                if (is_symlink(absoluteLink) && (!exists(absoluteLink) || (read_symlink(absoluteLink) != absoluteItem))) {
-                    remove(absoluteLink);
-                    create_symlink(absoluteItem, absoluteLink);
-                    cout << "Symlink to " << type << " " << combine(module.id, module.version) << " fixed\n";
+    auto processModules = [&root, &dest](const std::string& type, map<string, set<pair<string, string>>> &sModules) {
+        if (sModules.empty()) return;
+        path_node& dir = dest.empty() ? root.paths["MINECRAFT"][type + "s"] : root.paths["GENERAL"]["server"][dest][type + "s"];
+        ensureExists(dir);
+        for (auto& absoluteLink : fs::directory_iterator(dir.value)) {
+            std::string fileName = absoluteLink.path().lexically_relative(dir.value);
+            for (auto& [mc_version, modules] : sModules) {
+                path_node& dirEntries = root.paths["GENERAL"]["entries"][mc_version];
+                std::vector<module_entry> existent = lookRoot(root, fileName, mc_version);
+                if (existent.empty()) continue;
+                fs::path absoluteItem = absolute(dirEntries.value / fileName);
+                for (auto& module : existent) {
+                    if (modules.contains({module.id, module.version})) {
+                        if (is_symlink(absoluteLink) && (!exists(absoluteLink) || (read_symlink(absoluteLink) != absoluteItem))) {
+                            remove(absoluteLink);
+                            create_symlink(absoluteItem, absoluteLink);
+                            cout << "Symlink to " << type << " " << combine(module.id, module.version) << " fixed\n";
+                        }
+                        goto contOuter;
+                    }
                 }
-                goto contOuter;
+            }
+            if (is_symlink(absoluteLink)) {
+                remove(absoluteLink);
+                cout << "Symlink to " << type << " " << fileName << " removed\n";
+            } else {
+                cout << "Found unknown " << type << " " << fileName << '\n';
+            }
+            contOuter:
+            asm("nop");
+        }
+        for (auto &[mc_version, modules] : sModules) {
+            path_node &dirEntries = root.paths["GENERAL"]["entries"][mc_version];
+            for (auto &[module, moduleVersion]: modules) {
+                string modName = root.root["ENTRIES"][module][mc_version][moduleVersion].value;
+                fs::path absoluteItem = absolute(dirEntries.value / modName);
+                fs::path absoluteLink = dir.value / modName;
+                if (!exists(symlink_status(absoluteLink))) {
+                    create_symlink(absoluteItem, absoluteLink);
+                    cout << "Symlink to " << type << " " << combine(module, moduleVersion) << " created\n";
+                } else if (exists(absoluteLink) && !is_symlink(absoluteLink)) {
+                    cout << "Failed to create symlink to " << type << " " << combine(module, moduleVersion)
+                         << ", location already taken\n";
+                }
             }
         }
-        if (is_symlink(absoluteLink)) {
-            remove(absoluteLink);
-            cout << "Symlink to " << type << " " << fileName << " removed\n";
-        } else {
-            cout << "Found unknown " << type << " " << fileName << '\n';
-        }
-        contOuter:
-        asm("nop");
-    }
-    for (auto &[module, moduleVersion]: modules) {
-        string modName = root.root["ENTRIES"][module][version][moduleVersion].value;
-        fs::path absoluteItem = absolute(dirEntries / modName);
-        fs::path absoluteLink = dirModule / modName;
-        if (!exists(symlink_status(absoluteLink))) {
-            create_symlink(absoluteItem, absoluteLink);
-            cout << "Symlink to " << type << " " << combine(module, moduleVersion) << " created\n";
-        } else if (exists(absoluteLink) && !is_symlink(absoluteLink)) {
-            cout << "Failed to create symlink to " << type << " " << combine(module, moduleVersion) << ", location already taken\n";
-        }
-    }
+    };
+    processModules("mod", mods);
+    processModules("plugin", plugins);
 }
 
+int importOp(set<string> &options, vector<string> &arguments) {
+    if (arguments.size() != 4) exitWithUsage();
+    root_pack root;
+    string &server = arguments[1];
+    string &mc_version = arguments[2];
+    if (!parseConfig(root)) printError("HASH-GEN is outdated, please run \"mserman verify\" again");
+    if (root.root("SERVERS")(server)) printError("Server with name \"" + arguments[1] + "\" already exists");
+    if (!root.root("VERSIONS")(mc_version)) printError("Version with name \"" + arguments[2] + "\" doesn't exist");
+    root.paths["SERVER"] = path_node(arguments[3]);
+    string_node &rootModules = root.root["ENTRIES"];
+    string_node &rootServer = root.root["SERVERS"][server];
+    if (!is_directory(root.paths["SERVER"].value)) printError("Path \"" + arguments[3] + "\" doesn't point to server directory");
+    rootServer["CORE"];
+    string key, prefix = server + "_mods";
+    if (exists(root.paths["SERVER"]["mods"].value) && !fs::is_empty(root.paths["SERVER"]["mods"].value)) {
+        for (int counter = 1; root.root["PACKS"](key = (prefix + to_string(counter))); counter++) {}
+        rootServer["PACKS"][key].value = mc_version;
+        string_node &rootPack = root.root["PACKS"][key];
+        for (const auto &entry : fs::directory_iterator(root.paths["SERVER"]["mods"].value)) {
+            string fileName = entry.path().lexically_relative(root.paths["SERVER"]["mods"].value);
+            if (!entry.is_regular_file() && !entry.is_symlink() || entry.path().extension() != ".jar") {
+                cout << "Found invalid imported mod file \"" << fileName << "\"\n";
+            } else {
+                vector<module_entry> modules = lookFile(entry);
+                if (modules.empty()) {
+                    vector<module_entry> existing = lookRoot(root, fileName, mc_version);
+                    if (existing.empty()) {
+                        string temp = fileName.substr(0, fileName.size() - 4);
+                        string key1 = '.' + stringToLower(temp);
+                        rootModules[key1][mc_version]["default"].value = fileName;
+                        rootModules[key1][mc_version]["default"]["MODEL"].toCode(MODEL_FORGE, 2);
+                        rootModules[key1][mc_version]["default"]["STANDALONE"];
+                        rootPack["ENTRIES"][key1].value = "Adefault";
+                    } else {
+                        for (auto &module: existing) {
+                            rootPack["ENTRIES"][module.id].value = "A" + module.version;
+                        }
+                    }
+                } else {
+                    for (auto &module: modules) {
+                        if (bool edit = shouldVerify(root, module, mc_version); edit) {
+                            string_node &rootModule = rootModules[module.id][mc_version][module.version];
+                            rootModule.value = fileName;
+                            rootModule["MODEL"].toCode(module.model, 2);
+                            rootModule["STANDALONE"];
+                            for (const auto &[depId, depVersion]: module.dependency) {
+                                if (rootModule["DEPENDENCIES"](depId)("FORCED")) continue;
+                                string realDepVersion = ((char)depVersion.second) + depVersion.first;
+                                rootModule["DEPENDENCIES"][depId].value = depVersion.first.empty() ? "" : realDepVersion;
+                            }
+                            for (auto it = rootModule["DEPENDENCIES"].children.begin(); it != rootModule["DEPENDENCIES"].children.end();) {
+                                if (!it->second("FORCED") && !module.dependency.contains(it->first)) {
+                                    it = rootModule["DEPENDENCIES"].children.erase(it);
+                                } else ++it;
+                            }
+                            rootPack["ENTRIES"][module.id].value = "A" + module.version;
+                        }
+                    }
+                }
+                fs::copy(entry, root.paths["GENERAL"]["entries"][mc_version].value, fs::copy_options::update_existing);
+            }
+        }
+        prefix = arguments[1] + "_configs";
+        for (int counter = 1; root.root["META-CONFIGS"](key = (prefix + to_string(counter))); counter++) {}
+        path_node dirSysConfigs = ensureExists(root.paths["GENERAL"]["config"][key]);
+        root.root["META-CONFIGS"][key];
+        rootServer["META-CONFIG"].value = key;
+        if (exists(root.paths["SERVER"]["config"].value)) {
+            for (const auto& config : fs::recursive_directory_iterator(root.paths["SERVER"]["config"].value)) {
+                string fileName = config.path().lexically_relative(root.paths["SERVER"]["config"].value);
+                if (config.is_regular_file()) {
+                    fs::create_directories((dirSysConfigs.value / fileName).parent_path());
+                    fs::copy(config, dirSysConfigs.value / fileName);
+                    root.root["META-CONFIGS"][key][fileName].value = "VALID";
+                } else if (!config.is_directory()) {
+                    cout << "Found invalid imported config file \"" << fileName << "\"\n";
+                }
+            }
+        }
+    }
+    if (exists(root.paths["SERVER"]["plugins"].value) && !fs::is_empty(root.paths["SERVER"]["plugins"].value)) {
+        prefix = server + "_plugins";
+        for (int counter = 1; root.root["PACKS"](key = (prefix + to_string(counter))); counter++) {}
+        rootServer["PACKS"][key].value = mc_version;
+        string_node &rootPack = root.root["PACKS"][key];
+        for (const auto &entry : fs::directory_iterator(root.paths["SERVER"]["plugins"].value)) {
+            string fileName = entry.path().lexically_relative(root.paths["SERVER"]["plugins"].value);
+            if (!entry.is_regular_file() && !entry.is_symlink() || entry.path().extension() != ".jar") {
+                cout << "Found invalid imported plugin file \"" << fileName << "\"\n";
+            } else {
+                vector<module_entry> modules = lookFile(entry);
+                if (modules.empty()) {
+                    vector<module_entry> existing = lookRoot(root, fileName, mc_version);
+                    if (existing.empty()) {
+                        string temp = fileName.substr(0, fileName.size() - 4);
+                        string key1 = '.' + stringToLower(temp);
+                        rootModules[key1][mc_version]["default"].value = fileName;
+                        rootModules[key1][mc_version]["default"]["MODEL"].toCode(MODEL_PLUGIN, 2);
+                        rootModules[key1][mc_version]["default"]["STANDALONE"];
+                        rootPack["ENTRIES"][key1].value = "Adefault";
+                    } else {
+                        for (auto &module: existing) {
+                            rootPack["ENTRIES"][module.id].value = "A" + module.version;
+                        }
+                    }
+                } else {
+                    for (auto &module: modules) {
+                        if (bool edit = shouldVerify(root, module, mc_version); edit) {
+                            string_node &rootModule = rootModules[module.id][mc_version][module.version];
+                            rootModule.value = fileName;
+                            rootModule["MODEL"].toCode(module.model, 2);
+                            rootModule["STANDALONE"];
+                            for (const auto &[depId, depVersion]: module.dependency) {
+                                if (rootModule["DEPENDENCIES"](depId)("FORCED")) continue;
+                                string realDepVersion = ((char)depVersion.second) + depVersion.first;
+                                rootModule["DEPENDENCIES"][depId].value = depVersion.first.empty() ? "" : realDepVersion;
+                            }
+                            for (auto it = rootModule["DEPENDENCIES"].children.begin(); it != rootModule["DEPENDENCIES"].children.end();) {
+                                if (!it->second("FORCED") && !module.dependency.contains(it->first)) {
+                                    it = rootModule["DEPENDENCIES"].children.erase(it);
+                                } else ++it;
+                            }
+                            rootPack["ENTRIES"][module.id].value = "A" + module.version;
+                        }
+                    }
+                }
+                fs::copy(entry, root.paths["GENERAL"]["entries"][mc_version].value, fs::copy_options::update_existing);
+            }
+        }
+    }
+
+    cout << "Please, run \"mserman verify\" to finish creation\nNote that you will need to setup core by yourself\n";
+    flushConfig(root);
+    return 0;
+}
 /**Verification operation
  *
  * @param options options such as "--minecraft", "--allow-unsafe"
  * @param arguments currently unused
  * @return nothing
  */
-int verifyOp(set<string> &options, vector<string> &arguments) {
+int verifyOp(set<string> &options, vector<string>&) {
     root_pack root;
-    parseConfig(root.root, "mserman.conf");
-    parseConfig(root.cache, "cache.conf", false);
+    parseConfig(root);
     bool doMinecraft = options.contains("minecraft");
-    root.cache[".COMMENT1"].value = "GENERATED BY PROGRAM. VERIFICATION DATA";
-    root.cache[".COMMENT2"].value = "EDIT AT YOUR OWN RISK!! Changing this data may cause DATA LOSS,";
-    root.cache[".COMMENT3"].value = "or INSTABILITY in program behaviour.";
-    root.cache[".COMMENT4"].value = "Data here is NOT verified before usage!";
-    root.cache[".COMMENT5"].value = "However, deleting this file IS SAFE";
-    fs::path dirRoot = root.root["GENERAL"]["ROOT-DIR"].value;
-    fs::path dirMinecraft = root.root["GENERAL"]["MINECRAFT"].value;
-    fs::path dirBackups = root.root["GENERAL"]["BACKUP-DIR"].value;
-    fs::path dirConfigs = ensureExists(dirRoot, "config");
-    fs::path dirCores = ensureExists(dirRoot, "core");
-    fs::path dirAllEntries = ensureExists(dirRoot, "entries");
-    fs::path dirServers = ensureExists(dirRoot, "server");
     {
-        for (const auto &version: fs::directory_iterator(dirAllEntries)) {
-            if (!version.is_directory()) cout << "Found non-version object " << version.path().filename() << " in entries folder\n";
-            else if (!root.root("VERSIONS")(version.path().filename())) cout << "Found unknown version folder " << version.path().filename() << " in entries folder\n";
+        for (const auto &mc_version: fs::directory_iterator(ensureExists(root.paths["GENERAL"]["entries"]).value)) {
+            if (!mc_version.is_directory()) cout << "Found non-version object " << mc_version.path().filename() << " in entries folder\n";
+            else if (!root.root("VERSIONS")(mc_version.path().filename())) cout << "Found unknown version folder " << mc_version.path().filename() << " in entries folder\n";
             else continue;
-            root.stats["UNKNOWN"]["VERSIONS"][version.path().filename()]++;
+            root.stats["UNKNOWN"]["VERSIONS"][mc_version.path().filename()]++;
         }
         string_node &rootModules = root.root["ENTRIES"];
         for (auto &[mc_version, ignored]: root.root["VERSIONS"]) {
-            fs::path dirEntries = ensureExists(dirAllEntries, mc_version);
-            for (const auto &entry : fs::directory_iterator(dirEntries)) {
-                string fileName = relative(entry.path(), dirEntries);
+            path_node &dirEntries = ensureExists(root.paths["GENERAL"]["entries"][mc_version]);
+            for (const auto &entry : fs::directory_iterator(dirEntries.value)) {
+                string fileName = relative(entry.path(), dirEntries.value);
                 if (!entry.is_regular_file() || entry.path().extension() != ".jar") {
                     cout << "Found invalid file \"" << fileName << "\"\n";
                     root.stats["UNKNOWN"]["ENTRIES"][fileName]++;
@@ -614,7 +611,7 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
                             string temp = fileName.substr(0, fileName.size() - 4);
                             string key1 = '.' + stringToLower(temp);
                             rootModules[key1][mc_version]["default"].value = fileName;
-                            rootModules[key1][mc_version]["default"]["MODEL"].value = codeToString(MODEL_FORGE, 2);
+                            rootModules[key1][mc_version]["default"]["MODEL"].toCode(MODEL_FORGE, 2);
                             rootModules[key1][mc_version]["default"]["STANDALONE"];
                         }
                     } else {
@@ -622,7 +619,7 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
                             if (bool edit = shouldVerify(root, module, mc_version); edit) {
                                 string_node &rootModule = rootModules[module.id][mc_version][module.version];
                                 rootModule.value = fileName;
-                                rootModule["MODEL"].value = codeToString(module.model, 2);
+                                rootModule["MODEL"].toCode(module.model, 2);
                                 rootModule["STANDALONE"];
                                 for (const auto &[depId, depVersion]: module.dependency) {
                                     if (rootModule["DEPENDENCIES"](depId)("FORCED")) continue;
@@ -642,7 +639,7 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
         }
         set<string> processed;
         set<string> removed;
-        function<void(const string&, string_node&)> dfs = [&removed, &processed, &root, &dfs, &rootModules, &dirAllEntries](const string& module, string_node &rootEntry) {
+        function<void(const string&, string_node&)> dfs = [&removed, &processed, &root, &dfs, &rootModules](const string& module, string_node &rootEntry) {
             if (!processed.insert(module).second) return;
             set<string> removedMCVersion;
             for (auto &[mc_version, ignored]: root.root["VERSIONS"]) {
@@ -654,14 +651,14 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
                         root.stats["VALID"]["ENTRIES"][module][moduleVersion]++;
                         continue;
                     }
-                    string &status = stringToUpper(rootModule["STATUS"].value);
-                    fs::path filePath = dirAllEntries / mc_version / rootModule.value;
+                    string &status = rootModule["STATUS"].upper();
+                    fs::path filePath = root.paths["GENERAL"]["entries"][mc_version].value / rootModule.value;
                     if (is_regular_file(filePath) && filePath.extension() == ".jar") {
-                        int model = stringToCode(rootModule["MODEL"].value, 2, MODEL_FORGE);
-                        rootModule["MODEL"].value = codeToString(model, 2);
-                        int codeSide = stringToCode(rootModule["SIDE"].value, 2, SIDE_BOTH);
+                        int model = rootModule["MODEL"].asCode(2, MODEL_FORGE);
+                        rootModule["MODEL"].toCode(model, 2);
+                        int codeSide = rootModule["SIDE"].asCode(2, SIDE_BOTH);
                         if (model == MODEL_PLUGIN) codeSide = SIDE_SERVER;
-                        rootModule["SIDE"].value = codeToString(codeSide, 2);
+                        rootModule["SIDE"].toCode(codeSide, 2);
                         rootModule["DEPENDENCIES"];
                         if (status != "VALID" && status != "F-VALID") {
                             cout << "Need to configure " << combine(module, moduleVersion) << "\n";
@@ -680,13 +677,13 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
                                 if (!depVersion.empty() && root.stats("VALID")("ENTRIES")(dep)(depVersion)) {
                                     if (!rootModules[dep](mc_version)) continue;
                                     if (rootModules[dep][mc_version][depVersion]("SYNTHETIC")) continue;
-                                    int depModel = stringToCode(rootModules[dep][mc_version][depVersion]["MODEL"].value, 2,MODEL_FORGE);
+                                    int depModel = rootModules[dep][mc_version][depVersion]["MODEL"].asCode(2,MODEL_FORGE);
                                     if ((depModel & model) != model) {
                                         cout << "Dependency for " << combine(module, moduleVersion) << ": "<< combine(dep, depVersion) << " is using wrong model\n";
                                         root.stats["LOST"]["ENTRIES"][dep][depVersion]["BY-ENTRY"][module][moduleVersion]["MODEL"]++;
                                         fine = false;
                                     }
-                                    int depSide = stringToCode(rootModules[dep][mc_version][depVersion]["SIDE"].value, 2,SIDE_BOTH);
+                                    int depSide = rootModules[dep][mc_version][depVersion]["SIDE"].asCode(2,SIDE_BOTH);
                                     if ((depSide & codeSide) != codeSide) {
                                         cout << "Dependency for  " << combine(module, moduleVersion) << ": "<< combine(dep, depVersion) << " is on the wrong side\n";
                                         root.stats["LOST"]["ENTRIES"][dep][depVersion]["BY-ENTRY"][module][moduleVersion]["SIDE"]++;
@@ -754,7 +751,7 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
                         root.stats["LOST"]["ENTRIES"][module][moduleVersion]["BY-FAMILY"][family]++;
                         fine = false;
                     } else {
-                        auto &list = modelInfo[stringToCode(rootModules[module][mc_version][moduleVersion]["MODEL"].value, 2, MODEL_FORGE)];
+                        auto &list = modelInfo[rootModules[module][mc_version][moduleVersion]["MODEL"].asCode(2, MODEL_FORGE)];
                         list.emplace_back(module, moduleVersion);
                     }
                 }
@@ -772,9 +769,9 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
                             }
                         }
                     }
-                    root.cache["FAMILIES"][family][mc_version]["MODEL"].value = codeToString(maxModel->first, 2);
+                    root.cache["FAMILIES"][family][mc_version]["MODEL"].toCode(maxModel->first, 2);
                 } else {
-                    root.cache["FAMILIES"][family][mc_version]["MODEL"].value = codeToString(MODEL_FORGE, 2);
+                    root.cache["FAMILIES"][family][mc_version]["MODEL"].toCode(MODEL_FORGE, 2);
                 }
             }
             if (fine)
@@ -808,7 +805,7 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
                         root.stats["LOST"]["ENTRIES"][module][moduleVersion]["BY-PACK"][pack]++;
                         fine = false;
                     } else {
-                        auto &list = modelInfo[stringToCode(rootModules[module][mc_version][moduleVersion]["MODEL"].value, 2, MODEL_FORGE)];
+                        auto &list = modelInfo[rootModules[module][mc_version][moduleVersion]["MODEL"].asCode(2, MODEL_FORGE)];
                         list.emplace_back(module, pair{false, moduleVersion});
                     }
                 }
@@ -818,7 +815,7 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
                         root.stats["LOST"]["FAMILIES"][family]["BY-PACK"][pack]++;
                         fine = false;
                     } else {
-                        auto &list = modelInfo[stringToCode(root.cache["FAMILIES"][family][mc_version]["MODEL"].value, 2, MODEL_FORGE)];
+                        auto &list = modelInfo[root.cache["FAMILIES"][family][mc_version]["MODEL"].asCode(2, MODEL_FORGE)];
                         list.emplace_back(family, pair{true, ""});
                     }
                 auto maxModel = std::max_element(modelInfo.begin(), modelInfo.end(),[](const auto& a, const auto& b) {
@@ -841,9 +838,9 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
                             }
                         }
                     }
-                    root.cache["PACKS"][pack][mc_version]["MODEL"].value = codeToString(maxModel->first, 2);
+                    root.cache["PACKS"][pack][mc_version]["MODEL"].toCode(maxModel->first, 2);
                 } else {
-                    root.cache["PACKS"][pack][mc_version]["MODEL"].value = codeToString(MODEL_FORGE, 2);
+                    root.cache["PACKS"][pack][mc_version]["MODEL"].toCode(MODEL_FORGE, 2);
                 }
             }
             if (fine)
@@ -852,7 +849,7 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
         cout.flush();
     }
     {
-        for (const auto &metaConfig: fs::directory_iterator(dirConfigs)) {
+        for (const auto &metaConfig: fs::directory_iterator(ensureExists(root.paths["GENERAL"]["config"]).value)) {
             if (!metaConfig.is_directory()) cout << "Found non-meta-config object " << metaConfig.path().filename() << " in meta-configs folder\n";
             else if (!root.root("META-CONFIGS")(metaConfig.path().filename())) cout << "Found unknown meta-config folder " << metaConfig.path().filename() << '\n';
             else continue;
@@ -861,12 +858,14 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
         for (auto &[metaConfig, rootConfigs]: root.root["META-CONFIGS"]) {
             cout << "Processing meta-config \"" << metaConfig << "\"\n";
             const vector<string> metaType = {"META-CONFIGS", metaConfig};
-            fs::path dirConfig = ensureExists(dirConfigs, metaConfig);
-            for (const auto& config : fs::recursive_directory_iterator(dirConfig)) {
-                string fileName = relative(config.path(), dirConfig);
+            path_node &dirConfigs = ensureExists(root.paths["GENERAL"]["config"][metaConfig]);
+            for (const auto& config : fs::recursive_directory_iterator(dirConfigs.value)) {
+                string fileName = config.path().lexically_relative(dirConfigs.value);
                 if (config.is_regular_file()) {
-                    if (!rootConfigs(fileName))
+                    if (none_of(rootConfigs.begin(), rootConfigs.end(),
+                                [&](const auto& entry) { return fileName.starts_with(entry.first); })) {
                         rootConfigs[fileName];
+                    }
                 } else if (!config.is_directory()) {
                     cout << "Found invalid config file '" << fileName << "'\n";
                     root.stats["UNKNOWN"][metaType][fileName]++;
@@ -875,9 +874,9 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
             set<string> removed;
             bool fine = true;
             for (auto &config : rootConfigs) {
-                string &status = stringToUpper(config.second.value);
-                fs::path filePath = dirConfig / config.first;
-                if (is_regular_file(filePath)) {
+                string &status = config.second.upper();
+                fs::path filePath = dirConfigs.value / config.first;
+                if (is_regular_file(filePath) || is_directory(filePath)) {
                     if (status != "VALID") {
                         cout << "Need to configure config '" << config.first << "'\n";
                         status = "NEW";
@@ -892,12 +891,11 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
                     } else if (status != "GONE") cout << "Failed to find config file '" << config.first << "'\n";
                     else cout << "Need to clean entry for gone config '" << config.first << "'\n";
                     status = "GONE";
-                    fine = false;
                 } else {
                     cout << "Found invalid config file '" << config.first << "'\n";
                     status = "NOT-VALID";
-                    fine = false;
                 }
+                fine = false;
                 root.stats["UNKNOWN"][metaType][config.first]++;
             }
             if (fine) root.stats["VALID"][metaType]++;
@@ -906,7 +904,7 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
         cout.flush();
     }
     {
-        for (const auto &core: fs::directory_iterator(dirCores)) {
+        for (const auto &core: fs::directory_iterator(ensureExists(root.paths["GENERAL"]["core"]).value)) {
             if (!core.is_directory()) cout << "Found non-core object " << core.path().filename() << " in cores folder\n";
             else if (!root.root("CORES")(core.path().filename())) cout << "Found unknown core " << core.path().filename() << " in folder\n";
             else continue;
@@ -915,10 +913,10 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
         for (auto &[core, rootCore]: root.root["CORES"]) {
             cout << "Processing core \"" << core << "\"\n";
             const vector<string> coreType = {"CORES", core};
-            fs::path dir = ensureExists(dirCores, core);
-            string &status = stringToUpper(rootCore["STATUS"].value);
-            int codeSupport = stringToCode(rootCore["SUPPORT"].value, 3, 0b000);
-            rootCore["SUPPORT"].value = codeToString(codeSupport, 3);
+            path_node &dirCore = ensureExists(root.paths["GENERAL"]["core"][core]);
+            string &status = rootCore["STATUS"].upper();
+            int codeSupport = rootCore["SUPPORT"].asCode(3, 0b000);
+            rootCore["SUPPORT"].toCode(codeSupport, 3);;
             bool validTests = (bool) rootCore("USE-FOR-SIMULATION");
             const fs::path coreRuntime = rootCore["JAVA-RUNTIME"].value;
             const string coreMain = rootCore["MAIN"].value;
@@ -929,7 +927,7 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
                 continue;
             }
             bool fine = true;
-            if (!is_regular_file(dir / coreMain)) {
+            if (!is_regular_file(dirCore.value / coreMain)) {
                 cout << "Main file for core \"" << core << "\" not found\n";
                 root.stats["LOST"][coreType]["MAIN"]++;
                 fine = false;
@@ -952,63 +950,49 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
         cout.flush();
     }
     {
+        //TODO check the same way as servers
         if (doMinecraft) {
             string &mc_version = root.root["GENERAL"]["MINECRAFT"]["VERSION"].value;
             if (!root.root["VERSIONS"](mc_version)) {
                 cout << "User uses unknown version\n";
                 root.stats["LOST"]["VERSIONS"][mc_version]["BY-USER"]++;
-            } else if (!is_directory(dirMinecraft)) {
-                cout << "Invalid minecraft directory " << dirMinecraft << '\n';
+            } else if (!is_directory(root.paths["MINECRAFT"].value)) {
+                cout << "Invalid minecraft directory " << root.paths["MINECRAFT"].value << '\n';
             } else {
                 string_node &rootMinecraft = root.root["GENERAL"]["MINECRAFT"]["VERSIONS"][mc_version];
-                cout << "Processing minecraft directory " << dirMinecraft << '\n';
+                path_node &dirMinecraft = root.paths["MINECRAFT"];
+                cout << "Processing minecraft directory " << dirMinecraft.value << '\n';
                 string &oldVersion = root.cache["OLD-MINECRAFT"].value;
                 string &combination = rootMinecraft["SWAP-WHITELIST"].value;
                 if (combination.empty()) combination = "default";
                 string &oldCombination = root.cache["OLD-COMBINATION"].value;
                 if (oldVersion != mc_version || oldCombination != combination) {
-                    if (!root.root["VERSIONS"](oldVersion)) {
-                        string_node &oldRoot = root.root["GENERAL"]["MINECRAFT"]["VERSIONS"][oldVersion];
-                        fs::path dirBackedUp = ensureExists(dirBackups / "version" / oldVersion, oldCombination);
-                        for (auto &[entry, ignored]: oldRoot["MINECRAFT"]["SWAP-WHITELIST"]) {
-                            if (entry == "mods" || entry == "config" || entry == "versions") {
-                                cout << "Please avoid using directories such as \"mods\", \"config\", \"versions\" in your swap whitelist\n";
-                                continue;
-                            }
-                            fs::path absoluteItem = dirBackedUp / entry;
-                            fs::path absoluteLink = dirMinecraft / entry;
-                            if (is_symlink(absoluteLink)) {
-                                remove(absoluteLink);
-                            } else if (exists(absoluteLink)) {
-                                rename(absoluteLink, absoluteItem);
-                            }
+                    bool old_valid = (bool) root.root["VERSIONS"](oldVersion);
+                    string_node &root_used = old_valid ? root.root["GENERAL"]["MINECRAFT"]["VERSIONS"][oldVersion] : rootMinecraft;
+                    path_node &dirBackedUp = ensureExists(root.paths["BACKUP"]["version"][old_valid ? oldVersion : mc_version][oldCombination]);
+                    for (auto &[entry, ignored]: root_used["SWAP-WHITELIST"]) {
+                        if (entry == "mods" || entry == "config" || entry == "versions") {
+                            cout << "Please avoid using directories such as \"mods\", \"config\", \"versions\" in your swap whitelist\n";
+                            continue;
                         }
-                    } else {
-                        fs::path dirBackedUp = ensureExists(dirBackups / "version" / mc_version, combination);
-                        for (auto &[entry, ignored]: rootMinecraft["SWAP-WHITELIST"]) {
-                            if (entry == "mods" || entry == "config" || entry == "versions") {
-                                cout << "Please avoid using directories such as \"mods\", \"config\", \"versions\" in your swap whitelist\n";
-                                continue;
-                            }
-                            fs::path absoluteItem = dirBackedUp / entry;
-                            fs::path absoluteLink = dirMinecraft / entry;
-                            if (is_symlink(absoluteLink)) {
-                                remove(absoluteLink);
-                            } else if (exists(absoluteLink)) {
-                                rename(absoluteLink, absoluteItem);
-                            }
+                        fs::path absoluteItem = dirBackedUp.value / entry;
+                        fs::path absoluteLink = dirMinecraft.value / entry;
+                        if (is_symlink(absoluteLink)) {
+                            remove(absoluteLink);
+                        } else if (exists(absoluteLink)) {
+                            rename(absoluteLink, absoluteItem);
                         }
                     }
                 }
                 {
-                    fs::path dirBackedUp = ensureExists(dirBackups / "version" / mc_version, combination);
+                    path_node &dirBackedUp = ensureExists(root.paths["BACKUP"]["version"][mc_version][combination]);
                     for (auto &[entry, ignored]: rootMinecraft["SWAP-WHITELIST"]) {
                         if (entry == "mods" || entry == "config" || entry == "versions") {
                             cout << "Please avoid using directories such as \"mods\", \"config\", \"versions\" in your swap whitelist\n";
                             continue;
                         }
-                        fs::path absoluteItem = absolute(dirBackedUp / entry);
-                        fs::path absoluteLink = dirMinecraft / entry;
+                        fs::path absoluteItem = absolute(dirBackedUp.value / entry);
+                        fs::path absoluteLink = dirMinecraft.value / entry;
                         if (is_symlink(absoluteLink) && (!exists(absoluteLink) || (read_symlink(absoluteLink) != absoluteItem))) {
                             remove(absoluteLink);
                             create_symlink(absoluteItem, absoluteLink);
@@ -1022,26 +1006,26 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
                         }
                     }
                 }
-
+                string_node valid_packs;
                 for (auto &[pack, ignored]: rootMinecraft["PACKS"]) {
                     if (!root.stats("VALID")("PACKS")(pack)) {
                         cout << "Pack \"" << pack << "\" not valid\n";
                         root.stats["LOST"]["PACKS"][pack]["BY-USER"]++;
                         continue;
                     }
-                    int packModel = stringToCode(root.cache["PACKS"][pack][mc_version]["MODEL"].value, 2, MODEL_FORGE);
-                    linkPack(pack, root, dirMinecraft, dirRoot, mc_version, SIDE_CLIENT, packModel);
+                    valid_packs[pack].value = mc_version;
                 }
+                linkPacks(root, valid_packs, "", SIDE_CLIENT);
                 if (!root.stats("VALID")("META-CONFIGS")(rootMinecraft["META-CONFIG"])) {
                     cout << "Meta-config \"" << rootMinecraft["META-CONFIG"].value << "\" not valid\n";
                     root.stats["LOST"]["META-CONFIGS"][rootMinecraft["META-CONFIG"]]["BY-USER"]++;
                 } else {
-                    fs::path dirServerConfig = ensureExists(dirMinecraft, "config");
-                    fs::path dirConfig = ensureExists(dirRoot / "config", rootMinecraft["META-CONFIG"].value);
-                    auto it = fs::recursive_directory_iterator(dirServerConfig);
+                    path_node &dirServerConfig = ensureExists(dirMinecraft["config"]);
+                    path_node &dirConfig = root.paths["GENERAL"]["config"][rootMinecraft["META-CONFIG"]];
+                    auto it = fs::recursive_directory_iterator(dirServerConfig.value);
                     for (const auto& absoluteLink : it) {
-                        string fileName = absoluteLink.path().lexically_relative(dirServerConfig);
-                        fs::path absoluteItem = absolute(dirConfig / fileName);
+                        string fileName = absoluteLink.path().lexically_relative(dirServerConfig.value);
+                        fs::path absoluteItem = absolute(dirConfig.value / fileName);
                         if (is_directory(symlink_status(absoluteLink))) continue;
                         else if (is_regular_file(symlink_status(absoluteLink))) {
                             remove(absoluteItem);
@@ -1060,9 +1044,9 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
                             cout << "Symlink to config file \"" << fileName << "\" fixed\n";
                         }
                     }
-                    for (const auto& absoluteItem : fs::recursive_directory_iterator(dirConfig)) {
-                        string fileName = relative(absoluteItem.path(), dirConfig);
-                        fs::path absoluteLink = dirServerConfig / fileName;
+                    for (const auto& absoluteItem : fs::recursive_directory_iterator(dirConfig.value)) {
+                        string fileName = absoluteItem.path().lexically_relative(dirConfig.value);
+                        fs::path absoluteLink = dirServerConfig.value / fileName;
                         if (!is_regular_file(absoluteItem)) continue;
                         if (!exists(symlink_status(absoluteLink))) {
                             create_directories(absoluteLink.parent_path());
@@ -1079,8 +1063,13 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
         }
     }
     {
-        //TODO backup verification
-        for (const auto &server: fs::directory_iterator(dirServers)) {
+        for (const auto &backup: fs::directory_iterator(ensureExists(root.paths["BACKUP"]["server"]).value)) {
+            if (!backup.is_regular_file() || backup.path().extension() != ".bak") cout << "Found non-backup object " << backup.path().filename() << " in server backups folder\n";
+            else if (!root.root("SERVERS")(backup.path().stem().filename())) cout << "Found unknown server backup " << backup.path().filename() << "\n";
+            else continue;
+            root.stats["UNKNOWN"]["SERVERS"][backup.path().stem().filename()]["BACKUP"]++;
+        }
+        for (const auto &server: fs::directory_iterator(ensureExists(root.paths["GENERAL"]["server"]).value)) {
             if (!server.is_directory()) cout << "Found non-server object " << server.path().filename() << " in servers folder\n";
             else if (!root.root("SERVERS")(server.path().filename())) cout << "Found unknown server " << server.path().filename() << "\n";
             else continue;
@@ -1089,9 +1078,9 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
         for (auto &[server, rootServer]: root.root["SERVERS"]) {
             cout << "Processing server \"" << server << "\"\n";
             const vector<string> serverType = {"SERVERS", server};
-            string &status = stringToUpper(rootServer["STATUS"].value);
-            string &serverCore = rootServer["CORE"].value;
-            const vector<string> coreType = {"CORES", serverCore};
+            string &status = rootServer["STATUS"].upper();
+            string &core = rootServer["CORE"].value;
+            const vector<string> coreType = {"CORES", core};
             rootServer["JAVA-ARGS"];
             if (status != "NOT-VALID" && status != "VALID") {
                 cout << "Need to configure server\n";
@@ -1107,14 +1096,14 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
                 continue;
             }
             string_node &rootCore = root.root[coreType];
-            int support = stringToCode(rootCore["SUPPORT"].value, 3, 0b000);
+            int support = rootCore["SUPPORT"].asCode(3, 0b000);
             for (auto &[pack, packVersion]: rootServer["PACKS"]) {
                 if (!root.stats("VALID")("PACKS")(pack)) {
                     cout << "Pack \"" << pack << "\" not valid\n";
                     root.stats["LOST"]["PACKS"][pack]["BY-SERVER"][server]++;
                     fine = false;
                 } else {
-                    int packModel = stringToCode(root.cache["PACKS"][pack]["MODEL"].value, 2, MODEL_FORGE);
+                    int packModel = root.cache["PACKS"][pack]["MODEL"].asCode(2, MODEL_FORGE);
                     if (!((support >> packModel) & 1)) {
                         cout << "Pack \"" << pack << "\" should have different model\n";
                         root.stats["LOST"]["PACKS"][pack]["BY-SERVER"][server]["MODEL"]++;
@@ -1139,43 +1128,31 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
                 root.cache[serverType]["VALID"];
                 root.stats["VALID"][serverType]++;
                 if (!doMinecraft) {
-                    fs::path dirServer = ensureExists(dirServers, server);
-                    fs::path coreDir = ensureExists(dirRoot / "core", serverCore);
-                    for (const auto &entry: fs::directory_iterator(coreDir)) {
-                        string fileName = relative(entry.path(), coreDir);
+                    path_node &dirServer = ensureExists(root.paths["GENERAL"]["server"][server]);
+                    path_node &dirCore = root.paths["GENERAL"]["core"][core];
+                    for (const auto &entry: fs::directory_iterator(dirCore.value)) {
+                        string fileName = entry.path().lexically_relative(dirCore.value);
                         fs::path absoluteItem = absolute(entry.path());
-                        fs::path absoluteLink = dirServer / fileName;
-                        try {
-                            if (is_symlink(absoluteLink) && (!exists(absoluteLink) || (read_symlink(absoluteLink) != absoluteItem))) {
-                                remove(absoluteLink);
-                                create_symlink(absoluteItem, absoluteLink);
-                                cout << "Symlink fixed: " << fileName << '\n';
-                            } else if (!exists(absoluteLink)) {
-                                create_symlink(absoluteItem, absoluteLink);
-                                cout << "Symlink created: " << fileName << '\n';
-                            } else if (exists(absoluteLink) && !is_symlink(absoluteLink)) {
-                                cout << "Failed to create symlink, location already taken: " << fileName << '\n';
-                            }
-                        } catch (const fs::filesystem_error &) {
-                            if (is_symlink(absoluteLink)) {
-                                remove(absoluteLink);
-                                create_symlink(absoluteItem, absoluteLink);
-                                cout << "Symlink fixed: " << fileName << '\n';
-                            }
+                        fs::path absoluteLink = dirServer.value / fileName;
+                        if (is_symlink(absoluteLink) && (!exists(absoluteLink) || (read_symlink(absoluteLink) != absoluteItem))) {
+                            remove(absoluteLink);
+                            create_symlink(absoluteItem, absoluteLink);
+                            cout << "Symlink fixed: " << fileName << '\n';
+                        } else if (!exists(absoluteLink)) {
+                            create_symlink(absoluteItem, absoluteLink);
+                            cout << "Symlink created: " << fileName << '\n';
+                        } else if (exists(absoluteLink) && !is_symlink(absoluteLink)) {
+                            cout << "Failed to create symlink, location already taken: " << fileName << '\n';
                         }
                     }
-                    for (auto &[pack, packVersion]: rootServer["PACKS"]) {
-                        //TODO: Move pwd to current dir, make .config/mserman
-                        int packModel = stringToCode(root.cache["PACKS"][pack][packVersion]["MODEL"].value, 2, MODEL_FORGE);
-                        linkPack(pack, root, dirServer, dirRoot, packVersion.value, SIDE_SERVER, packModel);
-                    }
+                    linkPacks(root, rootServer["PACKS"], server, SIDE_SERVER);
                     if (support & (SUPPORT_FABRIC | SUPPORT_FORGE)) {
-                        fs::path dirServerConfig = ensureExists(dirServer, "config");
-                        fs::path dirConfig = ensureExists(dirRoot / "config", rootServer["META-CONFIG"].value);
-                        auto it = fs::recursive_directory_iterator(dirServerConfig);
+                        path_node &dirServerConfig = ensureExists(dirServer["config"]);
+                        path_node &dirConfig = root.paths["GENERAL"]["config"][rootServer["META-CONFIG"]];
+                        auto it = fs::recursive_directory_iterator(dirServerConfig.value);
                         for (const auto& absoluteLink : it) {
-                            string fileName = absoluteLink.path().lexically_relative(dirServerConfig);
-                            fs::path absoluteItem = absolute(dirConfig / fileName);
+                            string fileName = absoluteLink.path().lexically_relative(dirServerConfig.value);
+                            fs::path absoluteItem = absolute(dirConfig.value / fileName);
                             if (is_directory(symlink_status(absoluteLink))) continue;
                             else if (is_regular_file(symlink_status(absoluteLink))) {
                                 remove(absoluteItem);
@@ -1194,9 +1171,9 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
                                 cout << "Symlink to config file \"" << fileName << "\" fixed\n";
                             }
                         }
-                        for (const auto& absoluteItem : fs::recursive_directory_iterator(dirConfig)) {
-                            string fileName = relative(absoluteItem.path(), dirConfig);
-                            fs::path absoluteLink = dirServerConfig / fileName;
+                        for (const auto& absoluteItem : fs::recursive_directory_iterator(dirConfig.value)) {
+                            string fileName = absoluteItem.path().lexically_relative(dirConfig.value);
+                            fs::path absoluteLink = dirServerConfig.value / fileName;
                             if (!is_regular_file(absoluteItem)) continue;
                             if (!exists(symlink_status(absoluteLink))) {
                                 create_directories(absoluteLink.parent_path());
@@ -1212,10 +1189,6 @@ int verifyOp(set<string> &options, vector<string> &arguments) {
         }
         cout.flush();
     }
-    setHash(root);
-    flushConfig(root.root, "mserman.conf");
-    flushConfig(root.cache, "cache.conf");
-    auto stringStats = root.stats.convert<string_node>(+([](const int &toMap) {return to_string(toMap);}));
-    flushConfig(stringStats, "report.log");
+    flushConfig(root);
     return 0;
 }

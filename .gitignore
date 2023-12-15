@@ -1,7 +1,7 @@
 cmake-build-debug/
 debug/
 .idea/
-mserman.conf
+mserman.local
 cache.conf
 .local_gitignore
 data/

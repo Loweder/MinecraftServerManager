@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 set(TARGET ServerManager)
 set(MSERMAN_VERSION 1)
-set(VERSION 2.0.1)
+set(VERSION 2.0.2)
 project(${TARGET}
         VERSION ${VERSION}
         LANGUAGES C CXX)
