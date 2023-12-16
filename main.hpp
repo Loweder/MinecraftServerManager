@@ -101,11 +101,11 @@ struct root_pack {
     stat_node stats;
 };
 
-void flushConfig(string_node &config, ostream &stream, bool format = true, bool compact=false);
+void flushConfig(string_node &config, ostream &stream, bool format=true, bool compact=true);
 void parseConfig(string_node &config, istream &stream);
-void flushConfig(string_node &config, const fs::path &path, bool format = true, bool compact=false);
-void parseConfig(string_node &config, const fs::path &filePath, bool mkDef = true);
-void flushConfig(root_pack &root, bool write_hash = true, bool format = true, bool compact= false);
+void flushConfig(string_node &config, const fs::path &path, bool format=true, bool compact=true);
+void parseConfig(string_node &config, const fs::path &filePath, bool mkDef=true);
+void flushConfig(root_pack &root, bool write_hash=true, bool format=true, bool compact=true);
 bool parseConfig(root_pack &root);
 void parseJson(string_node &config, istream &from);
 bool checkHash(root_pack &root);

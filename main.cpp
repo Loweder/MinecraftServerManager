@@ -19,7 +19,7 @@ int main(int argc, const char** argv) {
             readingOptions = false;
         }
     }
-    if (!options.contains("force-root")) {
+    if (!options.contains("force-root") && !fs::is_regular_file("mserman.local")) {
         string_node global_config;
         std::filesystem::path homeDir = std::filesystem::path(getenv("HOME"));
         std::filesystem::path appDir = homeDir / ".config/mserman.global";

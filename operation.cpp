@@ -29,13 +29,13 @@ int makeOp(set<string> &, vector<string> &arguments) {
 }
 int sortOp(set<string> &, vector<string> &arguments) {
     if (arguments.size() != 2 && arguments.size() != 1) exitWithUsage();
-    if (arguments.size() == 2 && arguments[1] != "raw" && arguments[1] != "compact") exitWithUsage();
+    if (arguments.size() == 2 && arguments[1] != "raw" && arguments[1] != "wide") exitWithUsage();
     root_pack root;
     parseConfig(root);
     bool raw = false, compact = false;
     if (arguments.size() == 2)
-        raw = arguments[1] == "raw",  compact = arguments[1] == "compact";
-    flushConfig(root, false, !raw, compact);
+        raw = arguments[1] == "raw",  compact = arguments[1] == "wide";
+    flushConfig(root, false, !raw, !compact);
     return 0;
 }
 int collectOp(set<string> &, vector<string> &arguments) {

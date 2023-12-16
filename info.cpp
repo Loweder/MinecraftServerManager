@@ -18,7 +18,7 @@ int helpOp(set<string> &options, vector<string> &arguments) {
             "    boot <server>                      Start Minecraft server\n"
             //"    schedule <server> <time>           Schedule Minecraft server\n"
             //"    edit <path> <value>                Edit data in config\n"
-            "    sort [raw|compact]                 Sort data in config\n"
+            "    sort [raw|wide]                    Sort data in config\n"
             "    [-ms] verify                       Verify data in config\n"
             //"    [-y] reset [hard]                  Clean data in config (CAUTION! Dangerous)\n"
             //"    diversify <type> <name>            Remove version requirements from pack/family/entry dependencies\n"
