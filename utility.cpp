@@ -80,10 +80,10 @@ TEMPLATED_NODE(, operator bool, () const) {
     return !isNull();
 }
 
-TEMPLATED_NODE(SA(map<string, Self>::iterator), end, ()) {
+TEMPLATED_NODE(SA(typename map<string, Self>::iterator), end, ()) {
     return children.end();
 }
-TEMPLATED_NODE(SA(map<string, Self>::iterator), begin, ()){
+TEMPLATED_NODE(SA(typename map<string, Self>::iterator), begin, ()){
     return children.begin();
 }
 
@@ -138,7 +138,7 @@ void flushConfig(string_node &config, ostream &stream, const bool format, const 
             if (bool childSmall = child.children.size() <= 1; !child.children.empty()) {
                 stream << (format && (!compact || !childSmall) ? '\n' : ' ');
                 childSmall = lambda(child, (format && (!rootSmall || !compact) ? level + "    " : level));
-                if (format && (!compact || !childSmall && !rootSmall)) stream << '\n' << level;
+                if (format && (!compact || (!childSmall && !rootSmall))) stream << '\n' << level;
                 stream << "> ";
                 prevSmall = childSmall;
                 continue;

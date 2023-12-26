@@ -2,7 +2,6 @@
 #define MAIN_HPP
 
 #include "bit_defines.hpp"
-#include "cmake-build-debug/version.h"
 #include "json/json.h"
 #include <string>
 #include <filesystem>

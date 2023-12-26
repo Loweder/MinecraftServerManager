@@ -1,7 +1,9 @@
-cmake-build-debug/
 debug/
-.idea/
+example_mserman.conf
 mserman.local
 cache.conf
+report.log
 .local_gitignore
 data/
+README.md
+LICENSE

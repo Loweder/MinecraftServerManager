@@ -463,7 +463,7 @@ int importOp(set<string> &options, vector<string> &arguments) {
         string_node &rootPack = root.root["PACKS"][key];
         for (const auto &entry : fs::directory_iterator(root.paths["SERVER"]["mods"].value)) {
             string fileName = entry.path().lexically_relative(root.paths["SERVER"]["mods"].value);
-            if (!entry.is_regular_file() && !entry.is_symlink() || entry.path().extension() != ".jar") {
+            if ((!entry.is_regular_file() && !entry.is_symlink()) || entry.path().extension() != ".jar") {
                 cout << "Found invalid imported mod file \"" << fileName << "\"\n";
             } else {
                 vector<module_entry> modules = lookFile(entry);
