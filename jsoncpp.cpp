@@ -430,7 +430,7 @@ bool Reader::readValue() {
     currentValue().setOffsetLimit(token.end_ - begin_);
   } break;
   case tokenNull: {
-    Value v;
+    Value v{};
     currentValue().swapPayload(v);
     currentValue().setOffsetStart(token.start_ - begin_);
     currentValue().setOffsetLimit(token.end_ - begin_);
@@ -442,7 +442,7 @@ bool Reader::readValue() {
       // "Un-read" the current token and mark the current value as a null
       // token.
       current_--;
-      Value v;
+      Value v{};
       currentValue().swapPayload(v);
       currentValue().setOffsetStart(current_ - begin_ - 1);
       currentValue().setOffsetLimit(current_ - begin_);
@@ -1323,7 +1323,7 @@ bool OurReader::readValue() {
     currentValue().setOffsetLimit(token.end_ - begin_);
   } break;
   case tokenNull: {
-    Value v;
+    Value v{};
     currentValue().swapPayload(v);
     currentValue().setOffsetStart(token.start_ - begin_);
     currentValue().setOffsetLimit(token.end_ - begin_);
@@ -1353,7 +1353,7 @@ bool OurReader::readValue() {
       // "Un-read" the current token and mark the current value as a null
       // token.
       current_--;
-      Value v;
+      Value v{};
       currentValue().swapPayload(v);
       currentValue().setOffsetStart(current_ - begin_ - 1);
       currentValue().setOffsetLimit(current_ - begin_);

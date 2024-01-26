@@ -1,6 +1,12 @@
 #include "main.hpp"
+#include <filesystem>
 #include <iostream>
 #include <fstream>
+
+void printError(const string &line) {
+	cout << line << endl;
+	root.valid = false;
+}
 
 void stat_node::operator++(int) { // NOLINT(*-no-recursion)
     value++;
@@ -11,6 +17,12 @@ stat_node &stat_node::operator[](const string &index) {
     if (isNull()) return nullObject;
     if (!children.contains(index)) children.emplace(index, stat_node(this));
     return children[index];
+}
+typename map<string, path_node>::iterator path_node::begin() {
+	for (auto &it : fs::directory_iterator(value)) {
+		(*this)[it.path().filename()];
+	}
+	return node::begin();
 }
 path_node &path_node::operator[](const string &index) {
     if (isNull()) return nullObject;
@@ -24,19 +36,9 @@ string &string_node::upper() {
 string &string_node::lower() {
     return stringToLower(value);
 }
-int string_node::asCode(int bits, int default_value) {
-    int result = 0;
-    for (int i = 0; i < min((int) value.size(), bits); ++i)
-        if (value[i] == '+') result |= 1 << i;
-    for (int i = (int) value.size(); i < bits; ++i)
-        if (default_value & (1 << i)) result |= 1 << i;
-    return result;
-}
-void string_node::toCode(int value1, int bits) {
-    string result;
-    for (int i = 0; i < bits; ++i)
-        result += (value1 & (1 << i)) ? '+' : '-';
-    value = result;
+string &string_node::def(const string &str) {
+    if (value.empty()) value = str;
+    return value;
 }
 
 #define SA(...) __VA_ARGS__
@@ -86,6 +88,12 @@ TEMPLATED_NODE(SA(typename map<string, Self>::iterator), end, ()) {
 TEMPLATED_NODE(SA(typename map<string, Self>::iterator), begin, ()){
     return children.begin();
 }
+TEMPLATED_NODE(SA(typename map<string, Self>::const_iterator), end, () const) {
+    return children.end();
+}
+TEMPLATED_NODE(SA(typename map<string, Self>::const_iterator), begin, () const){
+    return children.begin();
+}
 
 TEMPLATED_NODE(size_t, hash, () const) {
     std::hash<string> keyHashGen;
@@ -93,7 +101,7 @@ TEMPLATED_NODE(size_t, hash, () const) {
     size_t seed = hashGen(value);
     for (const auto &[key, eValue]: children) {
         if (key == "HASH-GEN") continue;
-        seed ^= keyHashGen(key) + 0x9e3779b9 + (seed << 6) + (seed >> 2) ^ eValue.hash();
+        seed ^= (keyHashGen(key) + 0x9e3779b9 + (seed << 6) + (seed >> 2)) ^ eValue.hash();
     }
     return seed;
 }
@@ -102,16 +110,6 @@ TEMPLATED_NODE(bool, isNull, () const) {
     return ((Self*)this)==&nullObject;
 }
 TEMPLATED_NODE(Self, nullObject,);
-
-void exitWithUsage() {
-    auto a = set<string>();
-    auto b = vector<string>();
-    exit(helpOp(a, b));
-}
-void printError(const string &message) {
-    cerr << message << endl;
-    exit(EXIT_FAILURE);
-}
 
 string &stringToLower(string &str) {
     transform(str.begin(), str.end(), str.begin(), ::tolower);
@@ -154,7 +152,7 @@ void flushConfig(string_node &config, ostream &stream, const bool format, const 
 }
 void flushConfig(string_node &config, const fs::path &path, const bool format, const bool compact) {
     ofstream file{path};
-    if (!file.is_open()) printError("Failed to open " + path.filename().string() + " for writing.\n");
+    if (!file.is_open()) { printError("Failed to open " + path.filename().string() + " for writing."); return; }
     flushConfig(config, file, format, compact);
     file.close();
 }
@@ -180,7 +178,7 @@ void parseConfig(string_node &config, istream &stream) {
             path.push_back(dropped);
         else if (word == "=" || word == ">") {
             if (word == "=") readWord(stream, config[path].value);
-            if (path.empty()) printError("Expected 'eof', got '>'\n");
+            if (path.empty()) { printError("Expected 'eof', got '>'"); return; }
             dropped = path.back();
             path.pop_back();
         } else {
@@ -188,28 +186,29 @@ void parseConfig(string_node &config, istream &stream) {
             config[path];
         }
     }
-    if (!path.empty()) printError("Expected '>'x" + to_string(path.size()) + ", got 'eof'.\n");
+    if (!path.empty()) printError("Expected '>'x" + to_string(path.size()) + ", got 'eof'.");
 }
 void parseConfig(string_node &config, const fs::path &filePath, const bool mkDef) {
     if (!fs::exists(filePath)) {
         if (!mkDef) return;
         ofstream file{filePath};
-        if (!file.is_open()) printError("Failed to create default " + filePath.filename().string() + " config.\n");
+        if (!file.is_open()) { printError("Failed to create default " + filePath.filename().string() + " config."); return; }
         file << "GENERAL ROOT-DIR = data BACKUP-DIR = backup >";
         file.close();
     }
     ifstream file{filePath};
-    if (!file.is_open()) printError("Failed to open " + filePath.filename().string() + " for reading.\n");
+    if (!file.is_open()) { printError("Failed to open " + filePath.filename().string() + " for reading."); return; }
     parseConfig(config, file);
     file.close();
 }
-void flushConfig(root_pack &root, const bool write_hash, const bool format, const bool compact) {
+void flushConfig(const bool write_hash, const bool format, const bool compact) {
+    root.valid = true;
     root.cache[".COMMENT1"].value = "GENERATED BY PROGRAM. VERIFICATION DATA";
     root.cache[".COMMENT2"].value = "EDIT AT YOUR OWN RISK!! Changing this data may cause DATA LOSS,";
     root.cache[".COMMENT3"].value = "or INSTABILITY in program behaviour.";
     root.cache[".COMMENT4"].value = "Data here is NOT verified before usage!";
     root.cache[".COMMENT5"].value = "However, deleting this file IS SAFE";
-    if (write_hash) setHash(root);
+    if (write_hash) setHash();
     flushConfig(root.root, "mserman.local", format, compact);
     flushConfig(root.cache, "cache.dat", format, compact);
     auto string_stats = root.stats.convert<string_node>(+([](const int &toMap) {return to_string(toMap);}));
@@ -217,13 +216,14 @@ void flushConfig(root_pack &root, const bool write_hash, const bool format, cons
     string_stats["FILES"] = string_paths;
     flushConfig(string_stats, "report.log", format, compact);
 }
-bool parseConfig(root_pack &root) {
+bool parseConfig() {
+    root.valid = true;
     parseConfig(root.root, "mserman.local");
     parseConfig(root.cache, "cache.dat", false);
     root.paths["GENERAL"] = path_node(root.root["GENERAL"]["ROOT-DIR"].value);
     root.paths["BACKUP"] = path_node(root.root["GENERAL"]["BACKUP-DIR"].value);
     root.paths["MINECRAFT"] = path_node(root.root["GENERAL"]["MINECRAFT"].value);
-    return checkHash(root);
+    return checkHash();
 }
 
 void parseJsonInternal(string_node &config, const Json::Value &root) { // NOLINT(*-no-recursion)
@@ -247,7 +247,7 @@ void parseJson(string_node &config, istream &from) {
     parseJsonInternal(config, root);
 }
 
-bool checkHash(root_pack &root) {
+bool checkHash() {
     try {
         if(!root.cache("HASH-GEN")("VALUE")) {
             return false;
@@ -271,66 +271,66 @@ string ultos(unsigned long value) {
 
     return result;
 }
-void setHash(root_pack &root) {
+void setHash() {
     size_t seed = root.root.hash();
     seed ^= root.cache.hash() + 0x9e3779b9 + (seed << 6) + (seed >> 2);
     root.cache["HASH-GEN"]["VALUE"].value = ultos(seed);
 }
 
-//thread_pool::thread_pool(size_t threadCount) {
-//    for (int i = 0; i < threadCount; ++i) {
-//        workers.emplace_back([this] {worker_thread();});
-//    }
-//}
-//thread_pool::~thread_pool() {
-//    {
-//        unique_lock lock(mx);
-//        state |= 1;
-//    }
-//    condition.notify_all();
-//    for (auto &worker: workers) {
-//        worker.join();
-//    }
-//}
-//void thread_pool::wait(int by) {
-//    {
-//        unique_lock lock(mx);
-//        state |= 2;
-//        main_condition.wait(lock, [this, &by] { return scheduled[by] == 0; });
-//        state ^= 2;
-//    }
-//}
-//bool thread_pool::enqueue(function<void()> task, int by) {
-//    {
-//        unique_lock lock(mx);
-//        if (state & 1) return false;
-//        tasks.emplace_back(std::move(task), by);
-//        scheduled[by]++;
-//    }
-//    condition.notify_one();
-//    return true;
-//}
-//void thread_pool::worker_thread() {
-//    while (true) {
-//        pair<function<void()>, int> task;
-//        {
-//            unique_lock lock(mx);
-//            while (tasks.empty()) {
-//                if (state & 2) {
-//                    lock.unlock();
-//                    main_condition.notify_one();
-//                    lock.lock();
-//                }
-//                condition.wait(lock);
-//                if (state & 1 && tasks.empty())
-//                    return;
-//            }
-//            task = std::move(tasks.front());
-//            tasks.pop_front();
-//            lock.unlock();
-//            task.first();
-//            lock.lock();
-//            scheduled[task.second]--;
-//        }
-//    }
-//}
+/*thread_pool::thread_pool(size_t threadCount) {
+    for (int i = 0; i < threadCount; ++i) {
+        workers.emplace_back([this] {worker_thread();});
+    }
+}
+thread_pool::~thread_pool() {
+    {
+        unique_lock lock(mx);
+        state |= 1;
+    }
+    condition.notify_all();
+    for (auto &worker: workers) {
+        worker.join();
+    }
+}
+void thread_pool::wait(int by) {
+    {
+        unique_lock lock(mx);
+        state |= 2;
+        main_condition.wait(lock, [this, &by] { return scheduled[by] == 0; });
+        state ^= 2;
+    }
+}
+bool thread_pool::enqueue(function<void()> task, int by) {
+    {
+        unique_lock lock(mx);
+        if (state & 1) return false;
+        tasks.emplace_back(std::move(task), by);
+        scheduled[by]++;
+    }
+    condition.notify_one();
+    return true;
+}
+void thread_pool::worker_thread() {
+    while (true) {
+        pair<function<void()>, int> task;
+        {
+            unique_lock lock(mx);
+            while (tasks.empty()) {
+                if (state & 2) {
+                    lock.unlock();
+                    main_condition.notify_one();
+                    lock.lock();
+                }
+                condition.wait(lock);
+                if (state & 1 && tasks.empty())
+                    return;
+            }
+            task = std::move(tasks.front());
+            tasks.pop_front();
+            lock.unlock();
+            task.first();
+            lock.lock();
+            scheduled[task.second]--;
+        }
+    }
+}*/

@@ -1,38 +1,36 @@
-# See LICENSE file for copyright and license details.
+VERSION = 2.0.0
 
-include config.mk
+PREFIX = /usr/local
 
-SRC = jsoncpp.cpp verify.cpp utility.cpp operation.cpp info.cpp main.cpp
+LIBS = -lzip -lreadline 
+
+CPPFLAGS = -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_POSIX_C_SOURCE=200809L -DMSERMAN_VERSION=\"${VERSION}\"
+CFLAGS   = -std=c++2b -pedantic -Wall -Wno-deprecated-declarations -O3 ${CPPFLAGS}
+LDFLAGS  = ${LIBS}
+
+CC = g++
+
+SRC = jsoncpp.cpp verify.cpp utility.cpp operation.cpp info.cpp main.cpp interactive.cpp
 OBJ = ${SRC:.cpp=.o}
-
-all: options mserman
-
-options:
-	@echo mserman build options:
-	@echo "CFLAGS   = ${CPPFLAGS}"
-	@echo "LDFLAGS  = ${LDFLAGS}"
-	@echo "C++      = ${CC}"
-
-.c.o:
-	${CC} -c ${CPPFLAGS} $<
-
-${OBJ}: config.mk
 
 mserman: ${OBJ}
 	${CC} -o $@ ${OBJ} ${LDFLAGS}
 
+%.o: %.cpp
+	${CC} -c ${CFLAGS} -o $@ $<
+
 clean:
 	rm -f mserman ${OBJ}
 
-install: all
-	mkdir -p ${DESTDIR}${PREFIX}/bin
-	cp -f mserman ${DESTDIR}${PREFIX}/bin
-	chmod 755 ${DESTDIR}${PREFIX}/bin/mserman
-
 absolute: clean install
 
-uninstall:
-	rm -f ${DESTDIR}${PREFIX}/bin/mserman
+install: mserman
+	mkdir -p ${PREFIX}/bin
+	cp -f mserman ${PREFIX}/bin
+	chmod 755 ${PREFIX}/bin/mserman
 
-.PHONY: all options clean dist install uninstall absolute
+uninstall:
+	rm -f ${PREFIX}/bin/mserman
+
+.PHONY: clean install uninstall absolute
 

@@ -1,32 +1,32 @@
 [
   {
-    "directory": "/home/bf/Programming/C/ServerManager",
-    "command": "g++  -std=c++2b -pedantic -Wall -Wno-deprecated-declarations -O3 -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_POSIX_C_SOURCE=200809L -DMSERMAN_VERSION=\\\"2.0.0\\\"  -c -o jsoncpp.o jsoncpp.cpp",
+    "directory": "/home/bf",
+    "command": "g++ -c -std=c++2b -pedantic -Wall -Wno-deprecated-declarations -O3 -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_POSIX_C_SOURCE=200809L -DMSERMAN_VERSION=\\\"2.0.0\\\" -o jsoncpp.o jsoncpp.cpp",
     "file": "jsoncpp.cpp"
   },
   {
-    "directory": "/home/bf/Programming/C/ServerManager",
-    "command": "g++  -std=c++2b -pedantic -Wall -Wno-deprecated-declarations -O3 -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_POSIX_C_SOURCE=200809L -DMSERMAN_VERSION=\\\"2.0.0\\\"  -c -o verify.o verify.cpp",
+    "directory": "/home/bf",
+    "command": "g++ -c -std=c++2b -pedantic -Wall -Wno-deprecated-declarations -O3 -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_POSIX_C_SOURCE=200809L -DMSERMAN_VERSION=\\\"2.0.0\\\" -o verify.o verify.cpp",
     "file": "verify.cpp"
   },
   {
-    "directory": "/home/bf/Programming/C/ServerManager",
-    "command": "g++  -std=c++2b -pedantic -Wall -Wno-deprecated-declarations -O3 -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_POSIX_C_SOURCE=200809L -DMSERMAN_VERSION=\\\"2.0.0\\\"  -c -o utility.o utility.cpp",
+    "directory": "/home/bf",
+    "command": "g++ -c -std=c++2b -pedantic -Wall -Wno-deprecated-declarations -O3 -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_POSIX_C_SOURCE=200809L -DMSERMAN_VERSION=\\\"2.0.0\\\" -o utility.o utility.cpp",
     "file": "utility.cpp"
   },
   {
-    "directory": "/home/bf/Programming/C/ServerManager",
-    "command": "g++  -std=c++2b -pedantic -Wall -Wno-deprecated-declarations -O3 -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_POSIX_C_SOURCE=200809L -DMSERMAN_VERSION=\\\"2.0.0\\\"  -c -o operation.o operation.cpp",
+    "directory": "/home/bf",
+    "command": "g++ -c -std=c++2b -pedantic -Wall -Wno-deprecated-declarations -O3 -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_POSIX_C_SOURCE=200809L -DMSERMAN_VERSION=\\\"2.0.0\\\" -o operation.o operation.cpp",
     "file": "operation.cpp"
   },
   {
-    "directory": "/home/bf/Programming/C/ServerManager",
-    "command": "g++  -std=c++2b -pedantic -Wall -Wno-deprecated-declarations -O3 -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_POSIX_C_SOURCE=200809L -DMSERMAN_VERSION=\\\"2.0.0\\\"  -c -o info.o info.cpp",
+    "directory": "/home/bf",
+    "command": "g++ -c -std=c++2b -pedantic -Wall -Wno-deprecated-declarations -O3 -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_POSIX_C_SOURCE=200809L -DMSERMAN_VERSION=\\\"2.0.0\\\" -o info.o info.cpp",
     "file": "info.cpp"
   },
   {
-    "directory": "/home/bf/Programming/C/ServerManager",
-    "command": "g++  -std=c++2b -pedantic -Wall -Wno-deprecated-declarations -O3 -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_POSIX_C_SOURCE=200809L -DMSERMAN_VERSION=\\\"2.0.0\\\"  -c -o main.o main.cpp",
+    "directory": "/home/bf",
+    "command": "g++ -c -std=c++2b -pedantic -Wall -Wno-deprecated-declarations -O3 -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_POSIX_C_SOURCE=200809L -DMSERMAN_VERSION=\\\"2.0.0\\\" -o main.o main.cpp",
     "file": "main.cpp"
   }
 ]
